@@ -1,85 +1,102 @@
-import { App, Editor, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting } from 'obsidian';
+import { App, Plugin, PluginSettingTab, Setting, TFile, MarkdownView, WorkspaceLeaf, addIcon } from 'obsidian';
+import { SurveyNoteView, VIEW_TYPE_SURVEYNOTE } from './view';
 
-// Remember to rename these classes and interfaces!
+// Add a custom icon for the view switch
+addIcon('surveynote-icon', `<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-layout-grid"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg>`);
 
-interface MyPluginSettings {
+
+interface SurveyNotePluginSettings {
 	mySetting: string;
 }
 
-const DEFAULT_SETTINGS: MyPluginSettings = {
+const DEFAULT_SETTINGS: SurveyNotePluginSettings = {
 	mySetting: 'default'
 }
 
-export default class MyPlugin extends Plugin {
-	settings: MyPluginSettings;
+export default class SurveyNotePlugin extends Plugin {
+	settings: SurveyNotePluginSettings;
 
 	async onload() {
 		await this.loadSettings();
 
-		// This creates an icon in the left ribbon.
-		const ribbonIconEl = this.addRibbonIcon('dice', 'Sample Plugin', (evt: MouseEvent) => {
-			// Called when the user clicks the icon.
-			new Notice('This is a notice!');
-		});
-		// Perform additional things with the ribbon
-		ribbonIconEl.addClass('my-plugin-ribbon-class');
+		this.registerView(
+			VIEW_TYPE_SURVEYNOTE,
+			(leaf) => new SurveyNoteView(leaf)
+		);
 
-		// This adds a status bar item to the bottom of the app. Does not work on mobile apps.
-		const statusBarItemEl = this.addStatusBarItem();
-		statusBarItemEl.setText('Status Bar Text');
-
-		// This adds a simple command that can be triggered anywhere
 		this.addCommand({
-			id: 'open-sample-modal-simple',
-			name: 'Open sample modal (simple)',
-			callback: () => {
-				new SampleModal(this.app).open();
-			}
-		});
-		// This adds an editor command that can perform some operation on the current editor instance
-		this.addCommand({
-			id: 'sample-editor-command',
-			name: 'Sample editor command',
-			editorCallback: (editor: Editor, view: MarkdownView) => {
-				console.log(editor.getSelection());
-				editor.replaceSelection('Sample Editor Command');
-			}
-		});
-		// This adds a complex command that can check whether the current state of the app allows execution of the command
-		this.addCommand({
-			id: 'open-sample-modal-complex',
-			name: 'Open sample modal (complex)',
+			id: 'open-surveynote-view',
+			name: 'SurveyNote表示に切り替え',
 			checkCallback: (checking: boolean) => {
-				// Conditions to check
-				const markdownView = this.app.workspace.getActiveViewOfType(MarkdownView);
-				if (markdownView) {
-					// If checking is true, we're simply "checking" if the command can be run.
-					// If checking is false, then we want to actually perform the operation.
+				const leaf = this.app.workspace.activeLeaf;
+				if (leaf?.view instanceof MarkdownView) {
 					if (!checking) {
-						new SampleModal(this.app).open();
+						this.setSurveyNoteView(leaf);
 					}
-
-					// This command will only show up in Command Palette when the check function returns true
 					return true;
+				}
+				return false;
+			}
+		});
+
+		this.registerEvent(this.app.workspace.on('layout-change', this.onLayoutChange.bind(this)));
+
+		this.addSettingTab(new SampleSettingTab(this.app, this));
+	}
+
+	onLayoutChange() {
+		this.app.workspace.getLeavesOfType('markdown').forEach((leaf) => {
+			if (leaf.view instanceof MarkdownView) {
+				const file = leaf.view.file;
+				const fileCache = file ? this.app.metadataCache.getFileCache(file) : null;
+				
+				// Check if the button already exists
+				const existingButton = leaf.view.containerEl.querySelector('.surveynote-mode-button');
+
+				if (fileCache?.frontmatter?.['surveynote-plugin'] === 'note') {
+					if (!existingButton) {
+						// Add a button to the header only if it doesn't exist
+						const button = leaf.view.addAction('surveynote-icon', 'SurveyNote表示に切り替え', () => {
+							this.setSurveyNoteView(leaf);
+						});
+						// Add a class for styling or identification
+						button.classList.add('surveynote-mode-button');
+					}
+				} else {
+					// If the property is not set, remove the button if it exists
+					existingButton?.remove();
 				}
 			}
 		});
-
-		// This adds a settings tab so the user can configure various aspects of the plugin
-		this.addSettingTab(new SampleSettingTab(this.app, this));
-
-		// If the plugin hooks up any global DOM events (on parts of the app that doesn't belong to this plugin)
-		// Using this function will automatically remove the event listener when this plugin is disabled.
-		this.registerDomEvent(document, 'click', (evt: MouseEvent) => {
-			console.log('click', evt);
-		});
-
-		// When registering intervals, this function will automatically clear the interval when the plugin is disabled.
-		this.registerInterval(window.setInterval(() => console.log('setInterval'), 5 * 60 * 1000));
 	}
 
-	onunload() {
 
+	onunload() {
+		this.app.workspace.getLeavesOfType(VIEW_TYPE_SURVEYNOTE).forEach(leaf => {
+			if (leaf.view instanceof SurveyNoteView) {
+				// If we are in the SurveyNote view, switch back to markdown
+				this.setMarkdownView(leaf);
+			}
+		});
+		this.app.workspace.detachLeavesOfType(VIEW_TYPE_SURVEYNOTE);
+	}
+
+	async setSurveyNoteView(leaf: WorkspaceLeaf) {
+		const state = leaf.view.getState();
+		await leaf.setViewState({
+			type: VIEW_TYPE_SURVEYNOTE,
+			state: state,
+			active: true,
+		});
+	}
+
+	async setMarkdownView(leaf: WorkspaceLeaf) {
+		const state = leaf.view.getState();
+		await leaf.setViewState({
+			type: 'markdown',
+			state: state,
+			active: true,
+		});
 	}
 
 	async loadSettings() {
@@ -91,35 +108,17 @@ export default class MyPlugin extends Plugin {
 	}
 }
 
-class SampleModal extends Modal {
-	constructor(app: App) {
-		super(app);
-	}
-
-	onOpen() {
-		const {contentEl} = this;
-		contentEl.setText('Woah!');
-	}
-
-	onClose() {
-		const {contentEl} = this;
-		contentEl.empty();
-	}
-}
-
 class SampleSettingTab extends PluginSettingTab {
-	plugin: MyPlugin;
+	plugin: SurveyNotePlugin;
 
-	constructor(app: App, plugin: MyPlugin) {
+	constructor(app: App, plugin: SurveyNotePlugin) {
 		super(app, plugin);
 		this.plugin = plugin;
 	}
 
 	display(): void {
 		const {containerEl} = this;
-
 		containerEl.empty();
-
 		new Setting(containerEl)
 			.setName('Setting #1')
 			.setDesc('It\'s a secret')
