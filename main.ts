@@ -53,7 +53,7 @@ export default class SurveyNotePlugin extends Plugin {
 				// Check if the button already exists
 				const existingButton = leaf.view.containerEl.querySelector('.surveynote-mode-button');
 
-				if (fileCache?.frontmatter?.['surveynote-plugin'] === 'note') {
+				if (fileCache?.frontmatter?.['survey-note-plugin'] === 'note') {
 					if (!existingButton) {
 						// Add a button to the header only if it doesn't exist
 						const button = leaf.view.addAction('surveynote-icon', 'SurveyNote表示に切り替え', () => {

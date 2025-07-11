@@ -6,7 +6,7 @@ Obsidian用のSurveyNoteプラグインです。ノートを構造化された�
 
 ### 主な機能
 - **ビューの切り替え**: 通常のMarkdownビューとSurveyNoteビューを切り替えて使用できます
-- **自動ボタン表示**: フロントマターで`surveynote-plugin: note`が設定されたファイルに、自動的にビュー切り替えボタンが表示されます
+- **自動ボタン表示**: フロントマターで`survey-note-plugin: note`が設定されたファイルに、自動的にビュー切り替えボタンが表示されます
 - **構造化編集**: 以下の6つのセクションをグリッド形式で編集できます：
   - 背景目的
   - まとめ
@@ -23,7 +23,7 @@ Obsidian用のSurveyNoteプラグインです。ノートを構造化された�
    ノートのフロントマターに以下を追加してください：
    ```yaml
    ---
-   surveynote-plugin: note
+   survey-note-plugin: note
    ---
    ```
 
