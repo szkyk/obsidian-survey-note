@@ -129,9 +129,6 @@ export class SurveyNoteView extends ItemView {
             SECTIONS.CONTENT2,
         ];
 
-        console.log('Parsing markdown content...');
-        console.log('Section order:', sectionOrder);
-
         for (const line of lines) {
             let isHeading = false;
             
@@ -141,7 +138,6 @@ export class SurveyNoteView extends ItemView {
                     currentSection = sectionTitle;
                     sections[currentSection] = "";
                     isHeading = true;
-                    console.log(`Found section: ${sectionTitle}`);
                     break;
                 }
             }
@@ -155,12 +151,8 @@ export class SurveyNoteView extends ItemView {
             sections[key] = sections[key].trim();
         }
 
-        console.log('Parsed sections:', Object.keys(sections));
-        console.log('Section contents:', sections);
-
         return sections;
     }
-
 
     // Add getState and setState to handle view switching
     getState() {
@@ -254,9 +246,6 @@ export class SurveyNoteView extends ItemView {
 
     async render() {
         await this.parseMarkdown();
-        
-        console.log('Rendering SurveyNote view...');
-        console.log('Editor data:', this.editorData);
 
         const container = this.containerEl.children[1];
         container.empty();
@@ -274,33 +263,31 @@ export class SurveyNoteView extends ItemView {
         this.createGridItem(gridEl, SECTIONS.CONTENT1_SUPPLEMENT, "content1_supplement");
         this.createGridItem(gridEl, SECTIONS.CONTENT2, "content2");
         this.createGridItem(gridEl, SECTIONS.CONTENT2_SUPPLEMENT, "content2_supplement");
-        
-        console.log('Rendered sections in order:', [
-            SECTIONS.BACKGROUND,
-            SECTIONS.SUMMARY, 
-            SECTIONS.CONTENT1,
-            SECTIONS.CONTENT1_SUPPLEMENT,
-            SECTIONS.CONTENT2,
-            SECTIONS.CONTENT2_SUPPLEMENT
-        ]);
     }
 
     createGridItem(parent: HTMLElement, title: string, cls: string) {
         const itemEl = parent.createDiv({ cls: `grid-item ${cls}` });
-        // itemEl.createEl("h3", { text: title }); // ラベルを非表示にする
-        const textarea = itemEl.createEl("textarea");
+        
+        // Create content container
+        const contentContainer = itemEl.createDiv({ cls: "grid-item-content" });
+        
+        // Create textarea
+        const textarea = contentContainer.createEl("textarea");
+        
+        // Create image preview container
+        const imagePreviewContainer = contentContainer.createDiv({ cls: "image-preview-container" });
         
         // Always use the latest parsed data
         const sectionData = this.editorData[title] || "";
         textarea.value = sectionData;
         
-        console.log(`Creating grid item: ${title} (${cls})`);
-        console.log(`  Data: "${sectionData}"`);
-        console.log(`  Available sections:`, Object.keys(this.editorData));
+        // Initial image preview update
+        this.updateImagePreview(textarea.value, imagePreviewContainer);
         
         // Real-time save with debounce
         textarea.oninput = () => {
             this.editorData[title] = textarea.value;
+            this.updateImagePreview(textarea.value, imagePreviewContainer);
             this.debouncedSave();
         };
         
@@ -312,6 +299,118 @@ export class SurveyNoteView extends ItemView {
 
         // Add drag and drop functionality
         this.setupDragAndDrop(textarea, title);
+    }
+
+    private updateImagePreview(content: string, container: HTMLElement) {
+        // Clear existing previews
+        container.empty();
+        
+        // Extract image links from content
+        const imageLinks = this.extractImageLinks(content);
+        
+        // Create preview for each image
+        imageLinks.forEach(async (imagePath) => {
+            const imageEl = await this.createImagePreview(imagePath);
+            if (imageEl) {
+                container.appendChild(imageEl);
+            }
+        });
+    }
+
+    private extractImageLinks(content: string): string[] {
+        const imageLinks: string[] = [];
+        
+        // Match Obsidian wiki-style image links: ![[image.png]]
+        const wikiImageRegex = /!\[\[([^\]]+)\]\]/g;
+        let match;
+        
+        while ((match = wikiImageRegex.exec(content)) !== null) {
+            imageLinks.push(match[1]);
+        }
+        
+        // Match standard markdown image links: ![alt](image.png)
+        const markdownImageRegex = /!\[([^\]]*)\]\(([^)]+)\)/g;
+        
+        while ((match = markdownImageRegex.exec(content)) !== null) {
+            imageLinks.push(match[2]);
+        }
+        
+        return imageLinks;
+    }
+
+    private async createImagePreview(imagePath: string): Promise<HTMLElement | null> {
+        try {
+            // Try to resolve the image file
+            const imageFile = this.app.metadataCache.getFirstLinkpathDest(imagePath, this.file.path);
+            
+            if (!imageFile) {
+                console.warn(`Image file not found: ${imagePath}`);
+                return null;
+            }
+            
+            // Create image element
+            const imageContainer = document.createElement('div');
+            imageContainer.className = 'image-preview-item';
+            
+            const imageEl = document.createElement('img');
+            imageEl.className = 'image-preview';
+            
+            // Get the image resource URL
+            const resourcePath = this.app.vault.getResourcePath(imageFile);
+            imageEl.src = resourcePath;
+            imageEl.alt = imagePath;
+            
+            // Add click handler for larger preview
+            imageEl.addEventListener('click', () => {
+                this.showImageModal(resourcePath, imagePath);
+            });
+            
+            imageContainer.appendChild(imageEl);
+            
+            // Add image caption
+            const captionEl = document.createElement('div');
+            captionEl.className = 'image-caption';
+            captionEl.textContent = imageFile.name;
+            imageContainer.appendChild(captionEl);
+            
+            return imageContainer;
+            
+        } catch (error) {
+            console.error(`Error creating image preview for ${imagePath}:`, error);
+            return null;
+        }
+    }
+
+    private showImageModal(imageSrc: string, imagePath: string) {
+        // Create modal for larger image view
+        const modal = document.createElement('div');
+        modal.className = 'image-modal';
+        
+        const modalContent = document.createElement('div');
+        modalContent.className = 'image-modal-content';
+        
+        const closeBtn = document.createElement('span');
+        closeBtn.className = 'image-modal-close';
+        closeBtn.innerHTML = '&times;';
+        closeBtn.onclick = () => modal.remove();
+        
+        const modalImage = document.createElement('img');
+        modalImage.src = imageSrc;
+        modalImage.alt = imagePath;
+        modalImage.className = 'image-modal-img';
+        
+        modalContent.appendChild(closeBtn);
+        modalContent.appendChild(modalImage);
+        modal.appendChild(modalContent);
+        
+        // Close modal when clicking outside
+        modal.onclick = (e) => {
+            if (e.target === modal) {
+                modal.remove();
+            }
+        };
+        
+        document.body.appendChild(modal);
     }
 
     private setupDragAndDrop(textarea: HTMLTextAreaElement, title: string) {
@@ -406,6 +505,12 @@ export class SurveyNoteView extends ItemView {
             
             textarea.value = newValue;
             this.editorData[title] = newValue;
+            
+            // Update image preview
+            const imagePreviewContainer = textarea.parentElement?.querySelector('.image-preview-container') as HTMLElement;
+            if (imagePreviewContainer) {
+                this.updateImagePreview(newValue, imagePreviewContainer);
+            }
             
             // Save immediately after dropping
             await this.saveMarkdown();
