@@ -16,6 +16,7 @@ const SECTIONS = {
 export class SurveyNoteView extends ItemView {
     file: TFile;
     private editorData: Record<string, string> = {};
+    private saveTimeout: NodeJS.Timeout | null = null;
 
     constructor(leaf: WorkspaceLeaf) {
         super(leaf);
@@ -26,7 +27,10 @@ export class SurveyNoteView extends ItemView {
     }
 
     getDisplayText() {
-        return this.file ? this.file.basename : "SurveyNote";
+        if (this.file) {
+            return this.file.basename;
+        }
+        return "SurveyNote";
     }
 
     getIcon() {
@@ -41,8 +45,14 @@ export class SurveyNoteView extends ItemView {
     }
 
     async onClose() {
-        // Cleanup if needed
+        // Clear any pending save timeout
+        if (this.saveTimeout) {
+            clearTimeout(this.saveTimeout);
+            this.saveTimeout = null;
+        }
     }
+
+
 
     // Add getState and setState to handle view switching
     getState() {
@@ -135,6 +145,15 @@ export class SurveyNoteView extends ItemView {
         await this.app.vault.modify(this.file, finalContent);
     }
 
+    private debouncedSave() {
+        if (this.saveTimeout) {
+            clearTimeout(this.saveTimeout);
+        }
+        this.saveTimeout = setTimeout(() => {
+            this.saveMarkdown();
+        }, 500); // 500ms delay for debounced save
+    }
+
     async render() {
         await this.parseMarkdown();
 
@@ -145,8 +164,6 @@ export class SurveyNoteView extends ItemView {
 
         const headerEl = rootEl.createDiv({ cls: "surveynote-view-header" });
         headerEl.createEl("h2", { text: this.getDisplayText() });
-        const saveButton = headerEl.createEl("button", { text: "Save" });
-        saveButton.onclick = () => this.saveMarkdown();
 
         const gridEl = rootEl.createDiv({ cls: "surveynote-view-grid" });
 
@@ -163,8 +180,17 @@ export class SurveyNoteView extends ItemView {
         // itemEl.createEl("h3", { text: title }); // ラベルを非表示にする
         const textarea = itemEl.createEl("textarea");
         textarea.value = this.editorData[title] || "";
+        
+        // Real-time save with debounce
         textarea.oninput = () => {
             this.editorData[title] = textarea.value;
+            this.debouncedSave();
+        };
+        
+        // Save when focus is lost
+        textarea.onblur = () => {
+            this.editorData[title] = textarea.value;
+            this.saveMarkdown();
         };
     }
 }

@@ -1,4 +1,4 @@
-import { App, Plugin, PluginSettingTab, Setting, TFile, MarkdownView, WorkspaceLeaf, addIcon } from 'obsidian';
+import { App, Plugin, PluginSettingTab, Setting, MarkdownView, WorkspaceLeaf, addIcon } from 'obsidian';
 import { SurveyNoteView, VIEW_TYPE_SURVEYNOTE } from './view';
 
 // Add a custom icon for the view switch
@@ -24,6 +24,11 @@ export default class SurveyNotePlugin extends Plugin {
 			(leaf) => new SurveyNoteView(leaf)
 		);
 
+		// Add ribbon icon for easy switching
+		this.addRibbonIcon('surveynote-icon', 'SurveyNote表示切り替え', (evt: MouseEvent) => {
+			this.toggleView();
+		});
+
 		this.addCommand({
 			id: 'open-surveynote-view',
 			name: 'SurveyNote表示に切り替え',
@@ -39,45 +44,33 @@ export default class SurveyNotePlugin extends Plugin {
 			}
 		});
 
-		this.registerEvent(this.app.workspace.on('layout-change', this.onLayoutChange.bind(this)));
+		this.addCommand({
+			id: 'open-markdown-view',
+			name: 'マークダウン表示に切り替え',
+			checkCallback: (checking: boolean) => {
+				const leaf = this.app.workspace.activeLeaf;
+				if (leaf?.view instanceof SurveyNoteView) {
+					if (!checking) {
+						this.setMarkdownView(leaf);
+					}
+					return true;
+				}
+				return false;
+			}
+		});
+
+		this.addCommand({
+			id: 'toggle-surveynote-view',
+			name: 'SurveyNote表示切り替え',
+			callback: () => {
+				this.toggleView();
+			}
+		});
 
 		this.addSettingTab(new SampleSettingTab(this.app, this));
 	}
 
-	onLayoutChange() {
-		this.app.workspace.getLeavesOfType('markdown').forEach((leaf) => {
-			if (leaf.view instanceof MarkdownView) {
-				const file = leaf.view.file;
-				const fileCache = file ? this.app.metadataCache.getFileCache(file) : null;
-				
-				// Check if the button already exists
-				const existingButton = leaf.view.containerEl.querySelector('.surveynote-mode-button');
-
-				if (fileCache?.frontmatter?.['survey-note-plugin'] === 'note') {
-					if (!existingButton) {
-						// Add a button to the header only if it doesn't exist
-						const button = leaf.view.addAction('surveynote-icon', 'SurveyNote表示に切り替え', () => {
-							this.setSurveyNoteView(leaf);
-						});
-						// Add a class for styling or identification
-						button.classList.add('surveynote-mode-button');
-					}
-				} else {
-					// If the property is not set, remove the button if it exists
-					existingButton?.remove();
-				}
-			}
-		});
-	}
-
-
 	onunload() {
-		this.app.workspace.getLeavesOfType(VIEW_TYPE_SURVEYNOTE).forEach(leaf => {
-			if (leaf.view instanceof SurveyNoteView) {
-				// If we are in the SurveyNote view, switch back to markdown
-				this.setMarkdownView(leaf);
-			}
-		});
 		this.app.workspace.detachLeavesOfType(VIEW_TYPE_SURVEYNOTE);
 	}
 
@@ -105,6 +98,15 @@ export default class SurveyNotePlugin extends Plugin {
 
 	async saveSettings() {
 		await this.saveData(this.settings);
+	}
+
+	toggleView() {
+		const leaf = this.app.workspace.activeLeaf;
+		if (leaf?.view instanceof MarkdownView) {
+			this.setSurveyNoteView(leaf);
+		} else if (leaf?.view instanceof SurveyNoteView) {
+			this.setMarkdownView(leaf);
+		}
 	}
 }
 
