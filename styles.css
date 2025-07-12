@@ -19,7 +19,7 @@
 
 .surveynote-view-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: 3fr 2fr 3fr 2fr;
   grid-template-rows: auto 1fr;
   gap: 10px;
   flex-grow: 1;
