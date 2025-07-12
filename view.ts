@@ -119,14 +119,29 @@ export class SurveyNoteView extends ItemView {
         const sections: Record<string, string> = {};
         let currentSection = "";
 
+        // Define section order - longer names first to avoid partial matches
+        const sectionOrder = [
+            SECTIONS.CONTENT1_SUPPLEMENT, // "内容1の補足" - check before "内容1"
+            SECTIONS.CONTENT2_SUPPLEMENT, // "内容2の補足" - check before "内容2"
+            SECTIONS.BACKGROUND,
+            SECTIONS.SUMMARY,
+            SECTIONS.CONTENT1,
+            SECTIONS.CONTENT2,
+        ];
+
+        console.log('Parsing markdown content...');
+        console.log('Section order:', sectionOrder);
+
         for (const line of lines) {
             let isHeading = false;
-            for (const key in SECTIONS) {
-                const sectionTitle = SECTIONS[key as keyof typeof SECTIONS];
+            
+            // Check sections in specific order to avoid partial matches
+            for (const sectionTitle of sectionOrder) {
                 if (line.trim().startsWith(`## ${sectionTitle}`)) {
                     currentSection = sectionTitle;
                     sections[currentSection] = "";
                     isHeading = true;
+                    console.log(`Found section: ${sectionTitle}`);
                     break;
                 }
             }
@@ -139,6 +154,9 @@ export class SurveyNoteView extends ItemView {
         for(const key in sections) {
             sections[key] = sections[key].trim();
         }
+
+        console.log('Parsed sections:', Object.keys(sections));
+        console.log('Section contents:', sections);
 
         return sections;
     }
@@ -236,6 +254,9 @@ export class SurveyNoteView extends ItemView {
 
     async render() {
         await this.parseMarkdown();
+        
+        console.log('Rendering SurveyNote view...');
+        console.log('Editor data:', this.editorData);
 
         const container = this.containerEl.children[1];
         container.empty();
@@ -253,6 +274,15 @@ export class SurveyNoteView extends ItemView {
         this.createGridItem(gridEl, SECTIONS.CONTENT1_SUPPLEMENT, "content1_supplement");
         this.createGridItem(gridEl, SECTIONS.CONTENT2, "content2");
         this.createGridItem(gridEl, SECTIONS.CONTENT2_SUPPLEMENT, "content2_supplement");
+        
+        console.log('Rendered sections in order:', [
+            SECTIONS.BACKGROUND,
+            SECTIONS.SUMMARY, 
+            SECTIONS.CONTENT1,
+            SECTIONS.CONTENT1_SUPPLEMENT,
+            SECTIONS.CONTENT2,
+            SECTIONS.CONTENT2_SUPPLEMENT
+        ]);
     }
 
     createGridItem(parent: HTMLElement, title: string, cls: string) {
@@ -261,7 +291,12 @@ export class SurveyNoteView extends ItemView {
         const textarea = itemEl.createEl("textarea");
         
         // Always use the latest parsed data
-        textarea.value = this.editorData[title] || "";
+        const sectionData = this.editorData[title] || "";
+        textarea.value = sectionData;
+        
+        console.log(`Creating grid item: ${title} (${cls})`);
+        console.log(`  Data: "${sectionData}"`);
+        console.log(`  Available sections:`, Object.keys(this.editorData));
         
         // Real-time save with debounce
         textarea.oninput = () => {
