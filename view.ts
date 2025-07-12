@@ -241,7 +241,7 @@ export class SurveyNoteView extends ItemView {
         this.saveTimeout = setTimeout(async () => {
             await this.saveMarkdown();
             this.saveTimeout = null; // Clear the timeout after saving
-        }, 500); // 500ms delay for debounced save
+        }, 1500); // 1.5秒の遅延に変更（入力完了後に保存）
     }
 
     async render() {
@@ -271,48 +271,277 @@ export class SurveyNoteView extends ItemView {
         // Create content container
         const contentContainer = itemEl.createDiv({ cls: "grid-item-content" });
         
-        // Create textarea
-        const textarea = contentContainer.createEl("textarea");
-        
-        // Create image preview container
-        const imagePreviewContainer = contentContainer.createDiv({ cls: "image-preview-container" });
+        // Create custom editor container instead of simple textarea
+        const editorContainer = contentContainer.createDiv({ cls: "custom-editor-container" });
         
         // Always use the latest parsed data
         const sectionData = this.editorData[title] || "";
-        textarea.value = sectionData;
         
-        // Initial image preview update
-        this.updateImagePreview(textarea.value, imagePreviewContainer);
+        // Create the custom editor with inline image previews
+        this.createCustomEditor(editorContainer, sectionData, title);
         
-        // Real-time save with debounce
-        textarea.oninput = () => {
-            this.editorData[title] = textarea.value;
-            this.updateImagePreview(textarea.value, imagePreviewContainer);
-            this.debouncedSave();
-        };
-        
-        // Save when focus is lost
-        textarea.onblur = () => {
-            this.editorData[title] = textarea.value;
-            this.saveMarkdown();
-        };
-
-        // Add drag and drop functionality
-        this.setupDragAndDrop(textarea, title);
+        // Add drag and drop functionality to the editor container
+        this.setupDragAndDrop(editorContainer, title);
     }
 
-    private updateImagePreview(content: string, container: HTMLElement) {
-        // Clear existing previews
+    private createCustomEditor(container: HTMLElement, content: string, title: string) {
         container.empty();
         
-        // Extract image links from content
-        const imageLinks = this.extractImageLinks(content);
+        // Split content by lines to handle image links inline
+        const lines = content.split('\n');
         
-        // Create preview for each image
-        imageLinks.forEach(async (imagePath) => {
-            const imageEl = await this.createImagePreview(imagePath);
-            if (imageEl) {
-                container.appendChild(imageEl);
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            
+            // Create line container
+            const lineContainer = container.createDiv({ cls: "editor-line" });
+            
+            // Create textarea for this line
+            const lineTextarea = lineContainer.createEl("textarea", { cls: "line-textarea" });
+            lineTextarea.value = line;
+            lineTextarea.rows = 1;
+            lineTextarea.dataset.lineIndex = i.toString();
+            lineTextarea.dataset.sectionTitle = title;
+            
+            // Auto-resize textarea
+            this.autoResizeTextarea(lineTextarea);
+            
+            // Handle input events
+            lineTextarea.oninput = () => {
+                this.autoResizeTextarea(lineTextarea);
+                this.updateEditorData(container, title);
+                this.debouncedSave();
+            };
+            
+            lineTextarea.onblur = () => {
+                this.updateEditorData(container, title);
+                this.saveMarkdown();
+            };
+            
+            // Handle keyboard navigation and editing
+            lineTextarea.onkeydown = (e) => {
+                const lineIndex = parseInt(lineTextarea.dataset.lineIndex || '0');
+                const allTextareas = container.querySelectorAll('.line-textarea') as NodeListOf<HTMLTextAreaElement>;
+                
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    this.handleEnterKey(lineTextarea, container, title, lineIndex);
+                    return;
+                }
+                
+                if (e.key === 'Backspace') {
+                    const cursorPosition = lineTextarea.selectionStart;
+                    if (cursorPosition === 0) {
+                        e.preventDefault();
+                        this.handleBackspaceAtStart(lineTextarea, container, title, lineIndex);
+                        return;
+                    }
+                }
+                
+                if (e.key === 'Delete') {
+                    const cursorPosition = lineTextarea.selectionStart;
+                    const lineContent = lineTextarea.value;
+                    if (cursorPosition === lineContent.length) {
+                        e.preventDefault();
+                        this.handleDeleteAtEnd(lineTextarea, container, title, lineIndex);
+                        return;
+                    }
+                }
+                
+                if (e.key === 'ArrowUp') {
+                    if (lineIndex > 0) {
+                        e.preventDefault();
+                        this.moveToPreviousLine(lineTextarea, allTextareas, lineIndex);
+                        return;
+                    }
+                }
+                
+                if (e.key === 'ArrowDown') {
+                    if (lineIndex < allTextareas.length - 1) {
+                        e.preventDefault();
+                        this.moveToNextLine(lineTextarea, allTextareas, lineIndex);
+                        return;
+                    }
+                }
+            };
+            
+            // Check if this line contains an image link
+            const imageLinks = this.extractImageLinks(line);
+            if (imageLinks.length > 0) {
+                // Create image preview container for this line
+                const imagePreviewContainer = lineContainer.createDiv({ cls: "line-image-preview" });
+                
+                // Create preview for each image in this line
+                imageLinks.forEach(async (imagePath) => {
+                    const imageEl = await this.createImagePreview(imagePath);
+                    if (imageEl) {
+                        imagePreviewContainer.appendChild(imageEl);
+                    }
+                });
+            }
+        }
+    }
+
+    private handleEnterKey(textarea: HTMLTextAreaElement, container: HTMLElement, title: string, lineIndex: number) {
+        const cursorPosition = textarea.selectionStart;
+        const currentValue = textarea.value;
+        const beforeCursor = currentValue.substring(0, cursorPosition);
+        const afterCursor = currentValue.substring(cursorPosition);
+        
+        // Update current line
+        textarea.value = beforeCursor;
+        
+        // Get current content and insert new line
+        const lines = this.editorData[title].split('\n');
+        lines[lineIndex] = beforeCursor;
+        lines.splice(lineIndex + 1, 0, afterCursor);
+        
+        // Update editor data and recreate editor
+        const newContent = lines.join('\n');
+        this.editorData[title] = newContent;
+        this.createCustomEditor(container, newContent, title);
+        
+        // Focus next textarea
+        setTimeout(() => {
+            const newTextareas = container.querySelectorAll('.line-textarea') as NodeListOf<HTMLTextAreaElement>;
+            const nextTextarea = newTextareas[lineIndex + 1];
+            if (nextTextarea) {
+                nextTextarea.focus();
+                nextTextarea.setSelectionRange(0, 0);
+            }
+        }, 0);
+    }
+
+    private handleBackspaceAtStart(textarea: HTMLTextAreaElement, container: HTMLElement, title: string, lineIndex: number) {
+        if (lineIndex === 0) return; // Can't delete the first line
+        
+        const lines = this.editorData[title].split('\n');
+        const currentLineContent = lines[lineIndex];
+        const previousLineContent = lines[lineIndex - 1];
+        
+        // Merge current line with previous line
+        const mergedContent = previousLineContent + currentLineContent;
+        lines[lineIndex - 1] = mergedContent;
+        lines.splice(lineIndex, 1);
+        
+        // Update editor data and recreate editor
+        const newContent = lines.join('\n');
+        this.editorData[title] = newContent;
+        this.createCustomEditor(container, newContent, title);
+        
+        // Focus previous line at the merge point
+        setTimeout(() => {
+            const newTextareas = container.querySelectorAll('.line-textarea') as NodeListOf<HTMLTextAreaElement>;
+            const previousTextarea = newTextareas[lineIndex - 1];
+            if (previousTextarea) {
+                const cursorPosition = previousLineContent.length;
+                previousTextarea.focus();
+                previousTextarea.setSelectionRange(cursorPosition, cursorPosition);
+            }
+        }, 0);
+    }
+
+    private handleDeleteAtEnd(textarea: HTMLTextAreaElement, container: HTMLElement, title: string, lineIndex: number) {
+        const lines = this.editorData[title].split('\n');
+        if (lineIndex >= lines.length - 1) return; // Can't delete beyond last line
+        
+        const currentLineContent = lines[lineIndex];
+        const nextLineContent = lines[lineIndex + 1];
+        
+        // Merge next line with current line
+        const mergedContent = currentLineContent + nextLineContent;
+        lines[lineIndex] = mergedContent;
+        lines.splice(lineIndex + 1, 1);
+        
+        // Update editor data and recreate editor
+        const newContent = lines.join('\n');
+        this.editorData[title] = newContent;
+        this.createCustomEditor(container, newContent, title);
+        
+        // Focus current line at the merge point
+        setTimeout(() => {
+            const newTextareas = container.querySelectorAll('.line-textarea') as NodeListOf<HTMLTextAreaElement>;
+            const currentTextarea = newTextareas[lineIndex];
+            if (currentTextarea) {
+                const cursorPosition = currentLineContent.length;
+                currentTextarea.focus();
+                currentTextarea.setSelectionRange(cursorPosition, cursorPosition);
+            }
+        }, 0);
+    }
+
+    private moveToPreviousLine(currentTextarea: HTMLTextAreaElement, allTextareas: NodeListOf<HTMLTextAreaElement>, lineIndex: number) {
+        const currentCursorPosition = currentTextarea.selectionStart;
+        const previousTextarea = allTextareas[lineIndex - 1];
+        
+        if (previousTextarea) {
+            const previousLineLength = previousTextarea.value.length;
+            const targetPosition = Math.min(currentCursorPosition, previousLineLength);
+            
+            previousTextarea.focus();
+            previousTextarea.setSelectionRange(targetPosition, targetPosition);
+        }
+    }
+
+    private moveToNextLine(currentTextarea: HTMLTextAreaElement, allTextareas: NodeListOf<HTMLTextAreaElement>, lineIndex: number) {
+        const currentCursorPosition = currentTextarea.selectionStart;
+        const nextTextarea = allTextareas[lineIndex + 1];
+        
+        if (nextTextarea) {
+            const nextLineLength = nextTextarea.value.length;
+            const targetPosition = Math.min(currentCursorPosition, nextLineLength);
+            
+            nextTextarea.focus();
+            nextTextarea.setSelectionRange(targetPosition, targetPosition);
+        }
+    }
+
+    private autoResizeTextarea(textarea: HTMLTextAreaElement) {
+        textarea.style.height = 'auto';
+        textarea.style.height = textarea.scrollHeight + 'px';
+    }
+
+    private updateEditorData(container: HTMLElement, title: string) {
+        const textareas = container.querySelectorAll('.line-textarea') as NodeListOf<HTMLTextAreaElement>;
+        const lines: string[] = [];
+        
+        textareas.forEach(textarea => {
+            lines.push(textarea.value);
+        });
+        
+        this.editorData[title] = lines.join('\n');
+        
+        // Update image previews for changed lines
+        textareas.forEach((textarea, index) => {
+            const lineContainer = textarea.parentElement as HTMLElement;
+            const existingPreview = lineContainer.querySelector('.line-image-preview') as HTMLElement;
+            
+            const imageLinks = this.extractImageLinks(textarea.value);
+            
+            if (imageLinks.length > 0) {
+                if (!existingPreview) {
+                    const imagePreviewContainer = lineContainer.createDiv({ cls: "line-image-preview" });
+                    imageLinks.forEach(async (imagePath) => {
+                        const imageEl = await this.createImagePreview(imagePath);
+                        if (imageEl) {
+                            imagePreviewContainer.appendChild(imageEl);
+                        }
+                    });
+                } else {
+                    // Update existing preview
+                    existingPreview.empty();
+                    imageLinks.forEach(async (imagePath) => {
+                        const imageEl = await this.createImagePreview(imagePath);
+                        if (imageEl) {
+                            existingPreview.appendChild(imageEl);
+                        }
+                    });
+                }
+            } else {
+                // Remove preview if no image links
+                if (existingPreview) {
+                    existingPreview.remove();
+                }
             }
         });
     }
@@ -413,45 +642,45 @@ export class SurveyNoteView extends ItemView {
         document.body.appendChild(modal);
     }
 
-    private setupDragAndDrop(textarea: HTMLTextAreaElement, title: string) {
+    private setupDragAndDrop(editorContainer: HTMLElement, title: string) {
         // Prevent default drag behaviors
-        textarea.addEventListener('dragover', (e) => {
+        editorContainer.addEventListener('dragover', (e) => {
             e.preventDefault();
             e.stopPropagation();
-            textarea.classList.add('drag-over');
+            editorContainer.classList.add('drag-over');
         });
 
-        textarea.addEventListener('dragenter', (e) => {
+        editorContainer.addEventListener('dragenter', (e) => {
             e.preventDefault();
             e.stopPropagation();
-            textarea.classList.add('drag-over');
+            editorContainer.classList.add('drag-over');
         });
 
-        textarea.addEventListener('dragleave', (e) => {
+        editorContainer.addEventListener('dragleave', (e) => {
             e.preventDefault();
             e.stopPropagation();
-            // Only remove the class if we're actually leaving the textarea
-            if (!textarea.contains(e.relatedTarget as Node)) {
-                textarea.classList.remove('drag-over');
+            // Only remove the class if we're actually leaving the container
+            if (!editorContainer.contains(e.relatedTarget as Node)) {
+                editorContainer.classList.remove('drag-over');
             }
         });
 
-        textarea.addEventListener('drop', async (e) => {
+        editorContainer.addEventListener('drop', async (e) => {
             e.preventDefault();
             e.stopPropagation();
-            textarea.classList.remove('drag-over');
+            editorContainer.classList.remove('drag-over');
 
             const files = Array.from(e.dataTransfer?.files || []);
             
             for (const file of files) {
                 if (file.type.startsWith('image/')) {
-                    await this.handleImageDrop(file, textarea, title);
+                    await this.handleImageDrop(file, editorContainer, title);
                 }
             }
         });
     }
 
-    private async handleImageDrop(file: File, textarea: HTMLTextAreaElement, title: string) {
+    private async handleImageDrop(file: File, editorContainer: HTMLElement, title: string) {
         try {
             // Get the file content as array buffer
             const arrayBuffer = await file.arrayBuffer();
@@ -496,29 +725,17 @@ export class SurveyNoteView extends ItemView {
             // Generate markdown link
             const markdownLink = this.app.fileManager.generateMarkdownLink(createdFile, this.file.path);
             
-            // Insert the link at cursor position or at the end
-            const cursorPosition = textarea.selectionStart;
-            const currentValue = textarea.value;
-            const newValue = currentValue.substring(0, cursorPosition) + 
-                           '\n' + markdownLink + '\n' + 
-                           currentValue.substring(cursorPosition);
+            // Add the image link to the current editor data
+            const currentContent = this.editorData[title] || '';
+            const newContent = currentContent + (currentContent ? '\n' : '') + markdownLink;
             
-            textarea.value = newValue;
-            this.editorData[title] = newValue;
+            this.editorData[title] = newContent;
             
-            // Update image preview
-            const imagePreviewContainer = textarea.parentElement?.querySelector('.image-preview-container') as HTMLElement;
-            if (imagePreviewContainer) {
-                this.updateImagePreview(newValue, imagePreviewContainer);
-            }
+            // Recreate the editor to show the new content and image preview
+            this.createCustomEditor(editorContainer, newContent, title);
             
             // Save immediately after dropping
             await this.saveMarkdown();
-            
-            // Set cursor position after the inserted link
-            const newCursorPosition = cursorPosition + markdownLink.length + 2;
-            textarea.setSelectionRange(newCursorPosition, newCursorPosition);
-            textarea.focus();
             
         } catch (error) {
             console.error('Error handling image drop:', error);
