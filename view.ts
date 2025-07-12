@@ -1,16 +1,16 @@
 import { ItemView, WorkspaceLeaf, TFile, ViewStateResult, Notice } from "obsidian";
 
 // A unique key to identify the view
-export const VIEW_TYPE_SURVEYNOTE = "surveynote-view";
+export const VIEW_TYPE_SURVEYNOTE = "survey-note-view";
 
 // Define section titles as constants
 const SECTIONS = {
-    BACKGROUND: "背景目的",
-    SUMMARY: "まとめ",
-    CONTENT1: "内容1",
-    CONTENT1_SUPPLEMENT: "内容1の補足",
-    CONTENT2: "内容2",
-    CONTENT2_SUPPLEMENT: "内容2の補足",
+    BACKGROUND: "Purpose",
+    SUMMARY: "Summary",
+    CONTENT1: "Content1",
+    CONTENT1_SUPPLEMENT: "Content1 Supplement",
+    CONTENT2: "Content2",
+    CONTENT2_SUPPLEMENT: "Content2 Supplement",
 };
 
 export class SurveyNoteView extends ItemView {
