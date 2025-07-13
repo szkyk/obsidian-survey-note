@@ -15,9 +15,8 @@ const SECTIONS = {
     BACKGROUND: "Purpose",
     SUMMARY: "Summary",
     CONTENT1: "Content1",
-    CONTENT1_SUPPLEMENT: "Content1 Supplement",
+    SUPPLEMENT: "Supplement",
     CONTENT2: "Content2",
-    CONTENT2_SUPPLEMENT: "Content2 Supplement",
 };
 
 const markdownHighlighting = HighlightStyle.define([
@@ -160,8 +159,8 @@ export class SurveyNoteView extends ItemView {
             let newSectionContent = "";
             const sectionOrder = [
                 SECTIONS.BACKGROUND, SECTIONS.SUMMARY,
-                SECTIONS.CONTENT1, SECTIONS.CONTENT1_SUPPLEMENT,
-                SECTIONS.CONTENT2, SECTIONS.CONTENT2_SUPPLEMENT
+                SECTIONS.CONTENT1, SECTIONS.SUPPLEMENT,
+                SECTIONS.CONTENT2
             ];
 
             for (const sectionTitle of sectionOrder) {

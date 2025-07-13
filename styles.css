@@ -17,14 +17,14 @@
 
 .surveynote-view-grid {
   display: grid;
-  grid-template-columns: 3fr 2fr 3fr 2fr;
+  grid-template-columns: repeat(6, 1fr);
   grid-template-rows: auto 1fr;
   gap: 10px;
   flex-grow: 1;
   min-height: 0; /* Allow grid to shrink properly */
   grid-template-areas:
-    "background background summary summary"
-    "content1 content1_supplement content2 content2_supplement";
+    "background background background summary summary summary"
+    "content1 content1 supplement supplement content2 content2";
 }
 
 .grid-item {
@@ -61,9 +61,8 @@
 }
 
 .grid-item.content1,
-.grid-item.content1_supplement,
-.grid-item.content2,
-.grid-item.content2_supplement {
+.grid-item.supplement,
+.grid-item.content2 {
   min-height: 15em;
 }
 
@@ -72,9 +71,8 @@
 .grid-item.background { grid-area: background; }
 .grid-item.summary { grid-area: summary; }
 .grid-item.content1 { grid-area: content1; }
-.grid-item.content1_supplement { grid-area: content1_supplement; }
+.grid-item.supplement { grid-area: supplement; }
 .grid-item.content2 { grid-area: content2; }
-.grid-item.content2_supplement { grid-area: content2_supplement; }
 
 /* Drag and drop styling for CodeMirror */
 .cm-editor.cm-dropCursor {
