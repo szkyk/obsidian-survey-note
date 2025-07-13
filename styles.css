@@ -56,7 +56,7 @@
 
 .grid-item.background,
 .grid-item.summary {
-  min-height: 10em; /* Provide a sensible minimum height */
+  min-height: 5em; /* Provide a sensible minimum height */
   height: auto;
 }
 
