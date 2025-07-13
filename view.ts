@@ -205,13 +205,72 @@ export class SurveyNoteView extends ItemView {
         this.applyTheme(); // Apply theme on render
 
         const rootEl = container.createDiv({ cls: "surveynote-view-root" });
-        rootEl.createDiv({ cls: "surveynote-view-header" }).createEl("h2", { text: this.getDisplayText() });
+        const headerEl = rootEl.createDiv({ cls: "surveynote-view-header" });
+        
+        const titleInput = headerEl.createEl("input", {
+            type: "text",
+            value: this.getDisplayText(),
+            cls: "surveynote-title-input"
+        });
+
+        let isComposing = false;
+
+        this.registerDomEvent(titleInput, 'compositionstart', () => {
+            isComposing = true;
+        });
+
+        this.registerDomEvent(titleInput, 'compositionend', () => {
+            isComposing = false;
+        });
+
+        this.registerDomEvent(titleInput, 'blur', () => {
+            this.handleTitleRename(titleInput.value);
+        });
+
+        this.registerDomEvent(titleInput, 'keydown', (evt) => {
+            if (evt.key === 'Enter' && !isComposing) {
+                this.handleTitleRename(titleInput.value);
+                titleInput.blur();
+            }
+        });
+
         const gridEl = rootEl.createDiv({ cls: "surveynote-view-grid" });
 
         Object.entries(SECTIONS).forEach(([key, title]) => {
             const cls = key.toLowerCase();
             this.createGridItem(gridEl, title, cls);
         });
+    }
+
+    async handleTitleRename(newTitle: string) {
+        if (!this.file.parent) {
+            new Notice("Cannot rename file in the root folder.");
+            return;
+        }
+
+        const oldPath = this.file.path;
+        const oldTitle = this.file.basename;
+
+        if (newTitle === oldTitle) {
+            return;
+        }
+
+        if (!newTitle || newTitle.trim().length === 0) {
+            new Notice("File name cannot be empty.");
+            const titleInput = this.containerEl.querySelector('.surveynote-title-input') as HTMLInputElement;
+            if(titleInput) titleInput.value = oldTitle;
+            return;
+        }
+
+        const newPath = `${this.file.parent.path}/${newTitle}.md`;
+
+        try {
+            await this.app.fileManager.renameFile(this.file, newPath);
+        } catch (err) {
+            new Notice(`Error renaming file: ${err.message}`);
+            const titleInput = this.containerEl.querySelector('.surveynote-title-input') as HTMLInputElement;
+            if(titleInput) titleInput.value = oldTitle;
+        }
     }
 
     createGridItem(parent: HTMLElement, title: string, cls: string) {
