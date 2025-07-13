@@ -63,7 +63,7 @@ export class SurveyNoteView extends ItemView {
         this.addAction("file-text", "Markdown表示に切り替え", () => {
             this.setMarkdownView();
         });
-        this.applyTheme();
+        this.applyStyles();
     }
 
     async onClose() {
@@ -75,23 +75,25 @@ export class SurveyNoteView extends ItemView {
         }
     }
 
-    applyTheme() {
-        const theme = this.plugin.settings.theme;
-        const isObsidianDark = document.body.classList.contains('theme-dark');
-        const container = this.containerEl.children[1];
-
+    applyStyles() {
+        const container = this.containerEl.children[1] as HTMLElement;
         if (!container) return;
 
+        // Apply theme
+        const theme = this.plugin.settings.theme;
+        const isObsidianDark = document.body.classList.contains('theme-dark');
         let finalTheme: 'dark' | 'light';
-
         if (theme === 'auto') {
             finalTheme = isObsidianDark ? 'dark' : 'light';
         } else {
             finalTheme = theme;
         }
-
         container.removeClass('surveynote-theme-dark', 'surveynote-theme-light');
         container.addClass(`surveynote-theme-${finalTheme}`);
+
+        // Apply font size
+        const fontSize = this.plugin.settings.fontSize;
+        container.style.setProperty('--surveynote-font-size', `${fontSize}px`);
     }
 
     private async parseMarkdownContent(content: string): Promise<Record<string, string>> {
@@ -202,7 +204,7 @@ export class SurveyNoteView extends ItemView {
         await this.parseMarkdown();
         const container = this.containerEl.children[1];
         container.empty();
-        this.applyTheme(); // Apply theme on render
+        this.applyStyles(); // Apply styles on render
 
         const rootEl = container.createDiv({ cls: "surveynote-view-root" });
         const headerEl = rootEl.createDiv({ cls: "surveynote-view-header" });

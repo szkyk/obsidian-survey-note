@@ -7,10 +7,12 @@ addIcon('surveynote-icon', `<svg xmlns="http://www.w3.org/2000/svg" width="100" 
 
 interface SurveyNotePluginSettings {
 	theme: 'auto' | 'dark' | 'light';
+	fontSize: number;
 }
 
 const DEFAULT_SETTINGS: SurveyNotePluginSettings = {
 	theme: 'auto',
+	fontSize: 16,
 }
 
 export default class SurveyNotePlugin extends Plugin {
@@ -73,7 +75,7 @@ export default class SurveyNotePlugin extends Plugin {
 			this.app.workspace.on('css-change', () => {
 				this.app.workspace.getLeavesOfType(VIEW_TYPE_SURVEYNOTE).forEach(leaf => {
 					if (leaf.view instanceof SurveyNoteView) {
-						leaf.view.applyTheme();
+						leaf.view.applyStyles();
 					}
 				});
 			})
@@ -108,10 +110,10 @@ export default class SurveyNotePlugin extends Plugin {
 
 	async saveSettings() {
 		await this.saveData(this.settings);
-		// Re-apply theme to open views when settings change
+		// Re-apply styles to open views when settings change
 		this.app.workspace.getLeavesOfType(VIEW_TYPE_SURVEYNOTE).forEach(leaf => {
 			if (leaf.view instanceof SurveyNoteView) {
-				leaf.view.applyTheme();
+				leaf.view.applyStyles();
 			}
 		});
 	}
@@ -150,6 +152,20 @@ class SurveyNoteSettingTab extends PluginSettingTab {
 				.onChange(async (value: 'auto' | 'dark' | 'light') => {
 					this.plugin.settings.theme = value;
 					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('Font Size')
+			.setDesc('Set the font size for the editor panes (in pixels).')
+			.addText(text => text
+				.setPlaceholder('e.g., 16')
+				.setValue(this.plugin.settings.fontSize.toString())
+				.onChange(async (value) => {
+					const newSize = parseInt(value, 10);
+					if (!isNaN(newSize) && newSize > 0) {
+						this.plugin.settings.fontSize = newSize;
+						await this.plugin.saveSettings();
+					}
 				}));
 	}
 }

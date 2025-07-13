@@ -16,10 +16,10 @@
   margin-bottom: 10px;
 }
 
-.surveynote-title-input {
+.surveynote-view-root .surveynote-title-input {
   background-color: transparent !important;
   border: 0 !important;
-  font-size: var(--font-heading-2);
+  font-size: calc(var(--surveynote-font-size, 16px) * 1.6); /* Set font size relative to the base font size */
   font-weight: bold;
   width: 100%;
   padding: 0;
@@ -66,6 +66,7 @@
   height: 100%;
   width: 100%;
   background-color: transparent;
+  font-size: var(--surveynote-font-size, 16px); /* Use CSS variable for font size */
 }
 
 .grid-item .cm-scroller {
