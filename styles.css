@@ -71,6 +71,7 @@
 
 .grid-item .cm-scroller {
   overflow-y: auto;
+  padding: 0.8em;
 }
 
 .grid-item.background,
@@ -133,15 +134,15 @@
 }
 
 .cm-heading-1 {
-  font-size: 1.6em;
-}
-
-.cm-heading-2 {
   font-size: 1.4em;
 }
 
+.cm-heading-2 {
+  font-size: 1.25em;
+}
+
 .cm-heading-3 {
-  font-size: 1.2em;
+  font-size: 1.1em;
 }
 
 .cm-strong {
