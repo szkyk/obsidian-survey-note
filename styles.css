@@ -1,3 +1,8 @@
+/* Make the entire view pane transparent when our plugin is active */
+.workspace-leaf-content[data-type="survey-note-view"] .view-content {
+  background-color: transparent !important;
+}
+
 .surveynote-view-root {
   display: flex;
   flex-direction: column;
@@ -9,22 +14,23 @@
 .surveynote-view-header {
   flex-shrink: 0; /* Prevent header from shrinking */
   margin-bottom: 10px;
-  background-color: transparent;
 }
 
 .surveynote-title-input {
-  background-color: transparent;
-  border: none;
+  background-color: transparent !important;
+  border: 0 !important;
   font-size: var(--font-heading-2);
   font-weight: bold;
   width: 100%;
   padding: 0;
   margin: 0;
   color: var(--text-normal);
+  box-shadow: none;
 }
 
 .surveynote-title-input:focus {
-  outline: none;
+  outline: none !important;
+  box-shadow: none !important;
 }
 
 .surveynote-view-grid {
