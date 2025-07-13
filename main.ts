@@ -6,11 +6,11 @@ addIcon('surveynote-icon', `<svg xmlns="http://www.w3.org/2000/svg" width="100" 
 
 
 interface SurveyNotePluginSettings {
-	mySetting: string;
+	theme: 'auto' | 'dark' | 'light';
 }
 
 const DEFAULT_SETTINGS: SurveyNotePluginSettings = {
-	mySetting: 'default'
+	theme: 'auto',
 }
 
 export default class SurveyNotePlugin extends Plugin {
@@ -21,7 +21,7 @@ export default class SurveyNotePlugin extends Plugin {
 
 		this.registerView(
 			VIEW_TYPE_SURVEYNOTE,
-			(leaf) => new SurveyNoteView(leaf)
+			(leaf) => new SurveyNoteView(leaf, this)
 		);
 
 		// Add ribbon icon for easy switching
@@ -67,7 +67,17 @@ export default class SurveyNotePlugin extends Plugin {
 			}
 		});
 
-		this.addSettingTab(new SampleSettingTab(this.app, this));
+		this.addSettingTab(new SurveyNoteSettingTab(this.app, this));
+
+		this.registerEvent(
+			this.app.workspace.on('css-change', () => {
+				this.app.workspace.getLeavesOfType(VIEW_TYPE_SURVEYNOTE).forEach(leaf => {
+					if (leaf.view instanceof SurveyNoteView) {
+						leaf.view.applyTheme();
+					}
+				});
+			})
+		);
 	}
 
 	onunload() {
@@ -98,6 +108,12 @@ export default class SurveyNotePlugin extends Plugin {
 
 	async saveSettings() {
 		await this.saveData(this.settings);
+		// Re-apply theme to open views when settings change
+		this.app.workspace.getLeavesOfType(VIEW_TYPE_SURVEYNOTE).forEach(leaf => {
+			if (leaf.view instanceof SurveyNoteView) {
+				leaf.view.applyTheme();
+			}
+		});
 	}
 
 	toggleView() {
@@ -110,7 +126,7 @@ export default class SurveyNotePlugin extends Plugin {
 	}
 }
 
-class SampleSettingTab extends PluginSettingTab {
+class SurveyNoteSettingTab extends PluginSettingTab {
 	plugin: SurveyNotePlugin;
 
 	constructor(app: App, plugin: SurveyNotePlugin) {
@@ -121,14 +137,18 @@ class SampleSettingTab extends PluginSettingTab {
 	display(): void {
 		const {containerEl} = this;
 		containerEl.empty();
+		containerEl.createEl('h2', {text: 'Survey Note Settings'});
+
 		new Setting(containerEl)
-			.setName('Setting #1')
-			.setDesc('It\'s a secret')
-			.addText(text => text
-				.setPlaceholder('Enter your secret')
-				.setValue(this.plugin.settings.mySetting)
-				.onChange(async (value) => {
-					this.plugin.settings.mySetting = value;
+			.setName('Theme')
+			.setDesc('Set the theme for the Survey Note view.')
+			.addDropdown(dropdown => dropdown
+				.addOption('auto', 'Auto (Follow Obsidian)')
+				.addOption('dark', 'Dark')
+				.addOption('light', 'Light')
+				.setValue(this.plugin.settings.theme)
+				.onChange(async (value: 'auto' | 'dark' | 'light') => {
+					this.plugin.settings.theme = value;
 					await this.plugin.saveSettings();
 				}));
 	}

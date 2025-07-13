@@ -1,4 +1,11 @@
 import { ItemView, WorkspaceLeaf, TFile, ViewStateResult, Notice } from "obsidian";
+import { EditorState } from "@codemirror/state";
+import { EditorView, keymap } from "@codemirror/view";
+import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
+import { defaultKeymap, indentWithTab } from "@codemirror/commands";
+import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
+import { tags } from "@lezer/highlight";
+import SurveyNotePlugin from "main";
 
 // A unique key to identify the view
 export const VIEW_TYPE_SURVEYNOTE = "survey-note-view";
@@ -13,15 +20,29 @@ const SECTIONS = {
     CONTENT2_SUPPLEMENT: "Content2 Supplement",
 };
 
+const markdownHighlighting = HighlightStyle.define([
+    { tag: tags.heading1, class: "cm-heading-1" },
+    { tag: tags.heading2, class: "cm-heading-2" },
+    { tag: tags.heading3, class: "cm-heading-3" },
+    { tag: tags.strong, class: "cm-strong" },
+    { tag: tags.emphasis, class: "cm-emphasis" },
+    { tag: tags.strikethrough, class: "cm-strikethrough" },
+    { tag: tags.link, class: "cm-link" },
+    { tag: tags.quote, class: "cm-quote" },
+    { tag: tags.monospace, class: "cm-monospace" },
+]);
+
 export class SurveyNoteView extends ItemView {
+    plugin: SurveyNotePlugin;
     file: TFile;
     private editorData: Record<string, string> = {};
+    private editors: Record<string, EditorView> = {};
     private saveTimeout: NodeJS.Timeout | null = null;
-    private fileChangeHandler: (() => void) | null = null;
     private isUpdating: boolean = false;
 
-    constructor(leaf: WorkspaceLeaf) {
+    constructor(leaf: WorkspaceLeaf, plugin: SurveyNotePlugin) {
         super(leaf);
+        this.plugin = plugin;
     }
 
     getViewType() {
@@ -40,78 +61,38 @@ export class SurveyNoteView extends ItemView {
     }
 
     async onOpen() {
-        // Add an action to switch back to Markdown view
         this.addAction("file-text", "Markdown表示に切り替え", () => {
             this.setMarkdownView();
         });
-
-        // Set up file change monitoring
-        this.setupFileChangeMonitoring();
+        this.applyTheme();
     }
 
     async onClose() {
-        // Clear any pending save timeout
         if (this.saveTimeout) {
             clearTimeout(this.saveTimeout);
-            this.saveTimeout = null;
         }
-
-        // Remove file change monitoring
-        this.removeFileChangeMonitoring();
-    }
-
-    private setupFileChangeMonitoring() {
-        if (this.file && !this.fileChangeHandler) {
-            this.fileChangeHandler = () => {
-                if (!this.isUpdating) {
-                    this.refreshView();
-                }
-            };
-            
-            this.registerEvent(
-                this.app.vault.on('modify', (file) => {
-                    if (file === this.file && this.fileChangeHandler) {
-                        this.fileChangeHandler();
-                    }
-                })
-            );
+        for (const key in this.editors) {
+            this.editors[key].destroy();
         }
     }
 
-    private removeFileChangeMonitoring() {
-        this.fileChangeHandler = null;
-    }
+    applyTheme() {
+        const theme = this.plugin.settings.theme;
+        const isObsidianDark = document.body.classList.contains('theme-dark');
+        const container = this.containerEl.children[1];
 
-    private async refreshView() {
-        if (!this.file) return;
-        
-        // Check if there are pending save operations
-        if (this.saveTimeout !== null) {
-            // If there are pending saves, show a notice and don't update
-            new Notice('保存中のため、外部の変更は一時的に無視されます。');
-            return;
+        if (!container) return;
+
+        let finalTheme: 'dark' | 'light';
+
+        if (theme === 'auto') {
+            finalTheme = isObsidianDark ? 'dark' : 'light';
+        } else {
+            finalTheme = theme;
         }
-        
-        // Check if the current content differs from what's on disk
-        const currentContent = await this.app.vault.read(this.file);
-        const currentSections = await this.parseMarkdownContent(currentContent);
-        
-        // Compare current editor data with file content
-        let hasLocalChanges = false;
-        for (const key in this.editorData) {
-            if (this.editorData[key] !== (currentSections[key] || '')) {
-                hasLocalChanges = true;
-                break;
-            }
-        }
-        
-        if (hasLocalChanges) {
-            new Notice('ファイルが外部で変更されましたが、未保存の変更があります。手動で更新してください。');
-            return;
-        }
-        
-        // Refresh the view with the latest content
-        await this.render();
+
+        container.removeClass('surveynote-theme-dark', 'surveynote-theme-light');
+        container.addClass(`surveynote-theme-${finalTheme}`);
     }
 
     private async parseMarkdownContent(content: string): Promise<Record<string, string>> {
@@ -119,20 +100,10 @@ export class SurveyNoteView extends ItemView {
         const sections: Record<string, string> = {};
         let currentSection = "";
 
-        // Define section order - longer names first to avoid partial matches
-        const sectionOrder = [
-            SECTIONS.CONTENT1_SUPPLEMENT, // "内容1の補足" - check before "内容1"
-            SECTIONS.CONTENT2_SUPPLEMENT, // "内容2の補足" - check before "内容2"
-            SECTIONS.BACKGROUND,
-            SECTIONS.SUMMARY,
-            SECTIONS.CONTENT1,
-            SECTIONS.CONTENT2,
-        ];
+        const sectionOrder = Object.values(SECTIONS).sort((a, b) => b.length - a.length);
 
         for (const line of lines) {
             let isHeading = false;
-            
-            // Check sections in specific order to avoid partial matches
             for (const sectionTitle of sectionOrder) {
                 if (line.trim().startsWith(`## ${sectionTitle}`)) {
                     currentSection = sectionTitle;
@@ -141,7 +112,6 @@ export class SurveyNoteView extends ItemView {
                     break;
                 }
             }
-
             if (!isHeading && currentSection) {
                 sections[currentSection] += line + "\n";
             }
@@ -154,7 +124,6 @@ export class SurveyNoteView extends ItemView {
         return sections;
     }
 
-    // Add getState and setState to handle view switching
     getState() {
         const state = super.getState();
         state.file = this.file?.path;
@@ -164,14 +133,8 @@ export class SurveyNoteView extends ItemView {
     async setState(state: any, result: ViewStateResult): Promise<void> {
         const file = this.app.vault.getAbstractFileByPath(state.file);
         if (file instanceof TFile) {
-            // Remove existing file change monitoring
-            this.removeFileChangeMonitoring();
-            
             this.file = file;
-            await this.render();
-            
-            // Set up file change monitoring for the new file
-            this.setupFileChangeMonitoring();
+            await this.renderView();
         }
         return super.setState(state, result);
     }
@@ -185,19 +148,15 @@ export class SurveyNoteView extends ItemView {
 
     async parseMarkdown() {
         if (!this.file) return;
-
         const content = await this.app.vault.read(this.file);
         this.editorData = await this.parseMarkdownContent(content);
     }
 
     async saveMarkdown() {
-        if (!this.file) return;
-
-        // Set updating flag to prevent recursive updates
+        if (!this.file || this.isUpdating) return;
         this.isUpdating = true;
 
         try {
-            // Build the new content from the editor data
             let newSectionContent = "";
             const sectionOrder = [
                 SECTIONS.BACKGROUND, SECTIONS.SUMMARY,
@@ -207,9 +166,8 @@ export class SurveyNoteView extends ItemView {
 
             for (const sectionTitle of sectionOrder) {
                 const sectionContent = this.editorData[sectionTitle];
-                if (sectionContent !== undefined) {
-                    newSectionContent += `## ${sectionTitle}\n`;
-                    newSectionContent += `${sectionContent.trim()}\n\n`;
+                if (sectionContent !== undefined && sectionContent.trim() !== '') {
+                    newSectionContent += `## ${sectionTitle}\n${sectionContent.trim()}\n\n`;
                 }
             }
 
@@ -217,312 +175,121 @@ export class SurveyNoteView extends ItemView {
             const originalContent = await this.app.vault.read(this.file);
             let finalContent = "";
 
-            if (fileCache && fileCache.frontmatter && fileCache.frontmatterPosition) {
-                // If frontmatter exists, preserve it
+            if (fileCache?.frontmatter && fileCache.frontmatterPosition) {
                 const frontmatterEndOffset = fileCache.frontmatterPosition.end.offset;
                 const frontmatter = originalContent.substring(0, frontmatterEndOffset);
-                finalContent = frontmatter.trim() + "\n\n" + newSectionContent.trim();
+                finalContent = `${frontmatter.trim()}\n\n${newSectionContent.trim()}`;
             } else {
-                // Otherwise, just write the new content
                 finalContent = newSectionContent.trim();
             }
 
-            await this.app.vault.modify(this.file, finalContent);
+            if (originalContent.trim() !== finalContent.trim()) {
+                await this.app.vault.modify(this.file, finalContent);
+            }
         } finally {
-            // Reset updating flag
             this.isUpdating = false;
         }
     }
 
     private debouncedSave() {
-        if (this.saveTimeout) {
-            clearTimeout(this.saveTimeout);
-        }
-        this.saveTimeout = setTimeout(async () => {
-            await this.saveMarkdown();
-            this.saveTimeout = null; // Clear the timeout after saving
-        }, 500); // 500ms delay for debounced save
+        if (this.saveTimeout) clearTimeout(this.saveTimeout);
+        this.saveTimeout = setTimeout(() => {
+            this.saveMarkdown();
+            this.saveTimeout = null;
+        }, 1000);
     }
 
-    async render() {
+    async renderView() {
         await this.parseMarkdown();
-
         const container = this.containerEl.children[1];
         container.empty();
+        this.applyTheme(); // Apply theme on render
 
         const rootEl = container.createDiv({ cls: "surveynote-view-root" });
-
-        const headerEl = rootEl.createDiv({ cls: "surveynote-view-header" });
-        headerEl.createEl("h2", { text: this.getDisplayText() });
-
+        rootEl.createDiv({ cls: "surveynote-view-header" }).createEl("h2", { text: this.getDisplayText() });
         const gridEl = rootEl.createDiv({ cls: "surveynote-view-grid" });
 
-        this.createGridItem(gridEl, SECTIONS.BACKGROUND, "background");
-        this.createGridItem(gridEl, SECTIONS.SUMMARY, "summary");
-        this.createGridItem(gridEl, SECTIONS.CONTENT1, "content1");
-        this.createGridItem(gridEl, SECTIONS.CONTENT1_SUPPLEMENT, "content1_supplement");
-        this.createGridItem(gridEl, SECTIONS.CONTENT2, "content2");
-        this.createGridItem(gridEl, SECTIONS.CONTENT2_SUPPLEMENT, "content2_supplement");
+        Object.entries(SECTIONS).forEach(([key, title]) => {
+            const cls = key.toLowerCase();
+            this.createGridItem(gridEl, title, cls);
+        });
     }
 
     createGridItem(parent: HTMLElement, title: string, cls: string) {
         const itemEl = parent.createDiv({ cls: `grid-item ${cls}` });
-        
-        // Create content container
         const contentContainer = itemEl.createDiv({ cls: "grid-item-content" });
-        
-        // Create textarea
-        const textarea = contentContainer.createEl("textarea");
-        
-        // Create image preview container
-        const imagePreviewContainer = contentContainer.createDiv({ cls: "image-preview-container" });
-        
-        // Always use the latest parsed data
-        const sectionData = this.editorData[title] || "";
-        textarea.value = sectionData;
-        
-        // Initial image preview update
-        this.updateImagePreview(textarea.value, imagePreviewContainer);
-        
-        // Real-time save with debounce
-        textarea.oninput = () => {
-            this.editorData[title] = textarea.value;
-            this.updateImagePreview(textarea.value, imagePreviewContainer);
-            this.debouncedSave();
-        };
-        
-        // Save when focus is lost
-        textarea.onblur = () => {
-            this.editorData[title] = textarea.value;
-            this.saveMarkdown();
-        };
 
-        // Add drag and drop functionality
-        this.setupDragAndDrop(textarea, title);
-    }
-
-    private updateImagePreview(content: string, container: HTMLElement) {
-        // Clear existing previews
-        container.empty();
-        
-        // Extract image links from content
-        const imageLinks = this.extractImageLinks(content);
-        
-        // Create preview for each image
-        imageLinks.forEach(async (imagePath) => {
-            const imageEl = await this.createImagePreview(imagePath);
-            if (imageEl) {
-                container.appendChild(imageEl);
-            }
-        });
-    }
-
-    private extractImageLinks(content: string): string[] {
-        const imageLinks: string[] = [];
-        
-        // Match Obsidian wiki-style image links: ![[image.png]]
-        const wikiImageRegex = /!\[\[([^\]]+)\]\]/g;
-        let match;
-        
-        while ((match = wikiImageRegex.exec(content)) !== null) {
-            imageLinks.push(match[1]);
-        }
-        
-        // Match standard markdown image links: ![alt](image.png)
-        const markdownImageRegex = /!\[([^\]]*)\]\(([^)]+)\)/g;
-        
-        while ((match = markdownImageRegex.exec(content)) !== null) {
-            imageLinks.push(match[2]);
-        }
-        
-        return imageLinks;
-    }
-
-    private async createImagePreview(imagePath: string): Promise<HTMLElement | null> {
-        try {
-            // Try to resolve the image file
-            const imageFile = this.app.metadataCache.getFirstLinkpathDest(imagePath, this.file.path);
-            
-            if (!imageFile) {
-                console.warn(`Image file not found: ${imagePath}`);
-                return null;
-            }
-            
-            // Create image element
-            const imageContainer = document.createElement('div');
-            imageContainer.className = 'image-preview-item';
-            
-            const imageEl = document.createElement('img');
-            imageEl.className = 'image-preview';
-            
-            // Get the image resource URL
-            const resourcePath = this.app.vault.getResourcePath(imageFile);
-            imageEl.src = resourcePath;
-            imageEl.alt = imagePath;
-            
-            // Add click handler for larger preview
-            imageEl.addEventListener('click', () => {
-                this.showImageModal(resourcePath, imagePath);
-            });
-            
-            imageContainer.appendChild(imageEl);
-            
-            // Add image caption
-            const captionEl = document.createElement('div');
-            captionEl.className = 'image-caption';
-            captionEl.textContent = imageFile.name;
-            imageContainer.appendChild(captionEl);
-            
-            return imageContainer;
-            
-        } catch (error) {
-            console.error(`Error creating image preview for ${imagePath}:`, error);
-            return null;
-        }
-    }
-
-    private showImageModal(imageSrc: string, imagePath: string) {
-        // Create modal for larger image view
-        const modal = document.createElement('div');
-        modal.className = 'image-modal';
-        
-        const modalContent = document.createElement('div');
-        modalContent.className = 'image-modal-content';
-        
-        const closeBtn = document.createElement('span');
-        closeBtn.className = 'image-modal-close';
-        closeBtn.innerHTML = '&times;';
-        closeBtn.onclick = () => modal.remove();
-        
-        const modalImage = document.createElement('img');
-        modalImage.src = imageSrc;
-        modalImage.alt = imagePath;
-        modalImage.className = 'image-modal-img';
-        
-        modalContent.appendChild(closeBtn);
-        modalContent.appendChild(modalImage);
-        modal.appendChild(modalContent);
-        
-        // Close modal when clicking outside
-        modal.onclick = (e) => {
-            if (e.target === modal) {
-                modal.remove();
-            }
-        };
-        
-        document.body.appendChild(modal);
-    }
-
-    private setupDragAndDrop(textarea: HTMLTextAreaElement, title: string) {
-        // Prevent default drag behaviors
-        textarea.addEventListener('dragover', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            textarea.classList.add('drag-over');
-        });
-
-        textarea.addEventListener('dragenter', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            textarea.classList.add('drag-over');
-        });
-
-        textarea.addEventListener('dragleave', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            // Only remove the class if we're actually leaving the textarea
-            if (!textarea.contains(e.relatedTarget as Node)) {
-                textarea.classList.remove('drag-over');
+        const updateListener = EditorView.updateListener.of((update) => {
+            if (update.docChanged) {
+                this.editorData[title] = update.state.doc.toString();
+                this.debouncedSave();
             }
         });
 
-        textarea.addEventListener('drop', async (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            textarea.classList.remove('drag-over');
+        const state = EditorState.create({
+            doc: this.editorData[title] || "",
+            extensions: [
+                keymap.of([...defaultKeymap, indentWithTab]),
+                markdown({ base: markdownLanguage }),
+                EditorView.lineWrapping,
+                syntaxHighlighting(markdownHighlighting),
+                updateListener,
+            ],
+        });
 
-            const files = Array.from(e.dataTransfer?.files || []);
-            
-            for (const file of files) {
-                if (file.type.startsWith('image/')) {
-                    await this.handleImageDrop(file, textarea, title);
+        const editor = new EditorView({ state, parent: contentContainer });
+        this.editors[title] = editor;
+
+        // Use standard DOM event listeners on the parent container
+        this.registerDomEvent(contentContainer, 'dragover', (event) => {
+            event.preventDefault();
+        });
+
+        this.registerDomEvent(contentContainer, 'drop', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            const files = event.dataTransfer?.files;
+            if (files && files.length > 0) {
+                for (const file of Array.from(files)) {
+                    if (file.type.startsWith("image/")) {
+                        this.handleImageDrop(file, editor, title);
+                    }
                 }
             }
         });
     }
 
-    private async handleImageDrop(file: File, textarea: HTMLTextAreaElement, title: string) {
+    private async handleImageDrop(file: File, view: EditorView, title: string) {
         try {
-            // Get the file content as array buffer
             const arrayBuffer = await file.arrayBuffer();
-            
-            // Generate a unique filename
-            const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-            const extension = file.name.split('.').pop() || 'png';
-            const filename = `${file.name.replace(/\.[^/.]+$/, '')}-${timestamp}.${extension}`;
-            
-            // Use the file manager to get the new file parent and path
             const newFileParent = this.app.fileManager.getNewFileParent(this.file.path);
-            let attachmentPath = filename;
+            const extension = file.name.split('.').pop() || 'png';
+            const baseName = file.name.replace(/\.[^/.]+$/, '');
             
-            // Check if there's an attachments folder setting
-            const attachmentFolderPath = (this.app.vault as any).getConfig?.('attachmentFolderPath');
-            
-            if (attachmentFolderPath) {
-                // Create the attachment folder if it doesn't exist
-                const attachmentFolder = this.app.vault.getAbstractFileByPath(attachmentFolderPath);
-                if (!attachmentFolder) {
-                    await this.app.vault.createFolder(attachmentFolderPath);
-                }
-                attachmentPath = `${attachmentFolderPath}/${filename}`;
-            } else {
-                // Use default behavior: save in the same folder as the current file
-                attachmentPath = `${newFileParent.path}/${filename}`;
-            }
-            
-            // Ensure the path is unique
-            let finalPath = attachmentPath;
-            let counter = 1;
-            while (this.app.vault.getAbstractFileByPath(finalPath)) {
-                const nameWithoutExt = filename.replace(/\.[^/.]+$/, '');
-                const basePath = attachmentFolderPath || newFileParent.path;
-                finalPath = `${basePath}/${nameWithoutExt}-${counter}.${extension}`;
+            let filePath: string;
+            let counter = 0;
+            const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+
+            do {
+                const suffix = counter === 0 ? '' : `-${counter}`;
+                const filename = `${baseName}-${timestamp}${suffix}.${extension}`;
+                filePath = `${newFileParent.path}/${filename}`;
                 counter++;
-            }
-            
-            // Save the file using Obsidian's vault
-            const createdFile = await this.app.vault.createBinary(finalPath, arrayBuffer);
-            
-            // Generate markdown link
+            } while (await this.app.vault.adapter.exists(filePath));
+
+            const createdFile = await this.app.vault.createBinary(filePath, arrayBuffer);
             const markdownLink = this.app.fileManager.generateMarkdownLink(createdFile, this.file.path);
-            
-            // Insert the link at cursor position or at the end
-            const cursorPosition = textarea.selectionStart;
-            const currentValue = textarea.value;
-            const newValue = currentValue.substring(0, cursorPosition) + 
-                           '\n' + markdownLink + '\n' + 
-                           currentValue.substring(cursorPosition);
-            
-            textarea.value = newValue;
-            this.editorData[title] = newValue;
-            
-            // Update image preview
-            const imagePreviewContainer = textarea.parentElement?.querySelector('.image-preview-container') as HTMLElement;
-            if (imagePreviewContainer) {
-                this.updateImagePreview(newValue, imagePreviewContainer);
-            }
-            
-            // Save immediately after dropping
+
+            const { from, to } = view.state.selection.main;
+            view.dispatch({
+                changes: { from, to, insert: `\n${markdownLink}\n` }
+            });
+
+            this.editorData[title] = view.state.doc.toString();
             await this.saveMarkdown();
-            
-            // Set cursor position after the inserted link
-            const newCursorPosition = cursorPosition + markdownLink.length + 2;
-            textarea.setSelectionRange(newCursorPosition, newCursorPosition);
-            textarea.focus();
             
         } catch (error) {
             console.error('Error handling image drop:', error);
-            // Show error message to user
             new Notice('画像の保存に失敗しました: ' + error.message);
         }
     }

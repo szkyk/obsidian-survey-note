@@ -7,9 +7,7 @@
 }
 
 .surveynote-view-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
+  flex-shrink: 0; /* Prevent header from shrinking */
   margin-bottom: 10px;
 }
 
@@ -23,6 +21,7 @@
   grid-template-rows: auto 1fr;
   gap: 10px;
   flex-grow: 1;
+  min-height: 0; /* Allow grid to shrink properly */
   grid-template-areas:
     "background background summary summary"
     "content1 content1_supplement content2 content2_supplement";
@@ -33,45 +32,43 @@
   flex-direction: column;
   border: 1px solid var(--background-modifier-border);
   border-radius: 5px;
-  padding: 10px;
   background-color: var(--background-secondary);
+  overflow: hidden; /* Important for CodeMirror's scroll */
+  position: relative; /* For child positioning */
 }
 
-.grid-item h3 {
-  margin-top: 0;
-  margin-bottom: 8px;
-  font-size: 1.1em;
-  border-bottom: 1px solid var(--background-modifier-border);
-  padding-bottom: 5px;
-}
-
-.grid-item textarea {
-  width: 100%;
+.grid-item-content {
   height: 100%;
-  flex-grow: 1;
-  resize: none;
-  border: none;
+  width: 100%;
+  overflow: hidden;
+}
+
+/* CodeMirror styling */
+.grid-item .cm-editor {
+  height: 100%;
+  width: 100%;
   background-color: transparent;
-  padding: 5px;
-  box-sizing: border-box;
-  font-family: inherit;
-  font-size: inherit;
-  color: var(--text-normal);
 }
 
-.grid-item.background textarea,
-.grid-item.summary textarea {
-  height: 6em; /* 約3行分の高さを確保 */
-  flex-grow: 0; /* 高さを固定するためflex-growをリセット */
+.grid-item .cm-scroller {
+  overflow-y: auto;
 }
 
-.grid-item textarea:focus {
-  outline: none;
-  background-color: var(--background-primary);
+.grid-item.background,
+.grid-item.summary {
+  min-height: 10em; /* Provide a sensible minimum height */
+  height: auto;
 }
+
+.grid-item.content1,
+.grid-item.content1_supplement,
+.grid-item.content2,
+.grid-item.content2_supplement {
+  min-height: 15em;
+}
+
 
 /* Assigning grid areas */
-/* .grid-item.title は不要になったので削除 */
 .grid-item.background { grid-area: background; }
 .grid-item.summary { grid-area: summary; }
 .grid-item.content1 { grid-area: content1; }
@@ -79,120 +76,79 @@
 .grid-item.content2 { grid-area: content2; }
 .grid-item.content2_supplement { grid-area: content2_supplement; }
 
-/* Drag and drop styling */
-.grid-item textarea.drag-over {
-  background-color: var(--background-modifier-hover);
-  border: 2px dashed var(--interactive-accent);
-  box-shadow: 0 0 10px rgba(var(--interactive-accent-rgb), 0.3);
+/* Drag and drop styling for CodeMirror */
+.cm-editor.cm-dropCursor {
+  border-left-color: var(--interactive-accent) !important;
+}
+.cm-editor .cm-selectionBackground {
+  background-color: var(--background-modifier-hover) !important;
 }
 
-.grid-item textarea {
-  transition: background-color 0.2s ease, border 0.2s ease, box-shadow 0.2s ease;
+/* --- Syntax Highlighting & Cursor --- */
+
+/* Light theme cursor */
+.surveynote-theme-light .cm-content {
+  caret-color: black !important;
+}
+.surveynote-theme-light .cm-cursor {
+  border-left-color: black !important;
 }
 
-/* Image display styling for better visibility */
-.grid-item textarea::placeholder {
-  color: var(--text-muted);
-  opacity: 0.7;
+/* Dark theme cursor */
+.surveynote-theme-dark .cm-content {
+  caret-color: white !important;
+}
+.surveynote-theme-dark .cm-cursor {
+  border-left-color: white !important;
 }
 
-/* Grid item content layout */
-.grid-item-content {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  gap: 8px;
-}
 
-.grid-item-content textarea {
-  flex: 1;
-  min-height: 100px;
-}
-
-/* Image preview styling */
-.image-preview-container {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  max-height: 200px;
-  overflow-y: auto;
-}
-
-.image-preview-item {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 4px;
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 4px;
-  background-color: var(--background-primary);
-}
-
-.image-preview {
-  max-width: 100%;
-  max-height: 120px;
-  object-fit: contain;
-  cursor: pointer;
-  border-radius: 4px;
-  transition: transform 0.2s ease;
-}
-
-.image-preview:hover {
-  transform: scale(1.05);
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
-}
-
-.image-caption {
-  margin-top: 4px;
-  font-size: 0.8em;
-  color: var(--text-muted);
-  text-align: center;
-  word-break: break-word;
-}
-
-/* Image modal styling */
-.image-modal {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background-color: rgba(0, 0, 0, 0.8);
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  z-index: 1000;
-}
-
-.image-modal-content {
-  position: relative;
-  max-width: 90%;
-  max-height: 90%;
-  background-color: var(--background-primary);
-  border-radius: 8px;
-  padding: 20px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-}
-
-.image-modal-close {
-  position: absolute;
-  top: 10px;
-  right: 15px;
-  font-size: 28px;
+.cm-heading-1 {
+  font-size: 1.8em;
   font-weight: bold;
-  color: var(--text-muted);
-  cursor: pointer;
-  z-index: 1001;
-}
-
-.image-modal-close:hover {
   color: var(--text-normal);
 }
 
-.image-modal-img {
-  max-width: 100%;
-  max-height: 70vh;
-  object-fit: contain;
-  display: block;
+.cm-heading-2 {
+  font-size: 1.5em;
+  font-weight: bold;
+  color: var(--text-normal);
+}
+
+.cm-heading-3 {
+  font-size: 1.2em;
+  font-weight: bold;
+  color: var(--text-normal);
+}
+
+.cm-strong {
+  font-weight: bold;
+}
+
+.cm-emphasis {
+  font-style: italic;
+}
+
+.cm-strikethrough {
+  text-decoration: line-through;
+}
+
+.cm-link {
+  color: var(--text-accent);
+  text-decoration: underline;
+}
+
+.cm-quote {
+  color: var(--text-muted);
+  border-left: 2px solid var(--text-muted);
+  padding-left: 8px;
+  display: block; /* Make it block-level to take full width */
+}
+
+.cm-monospace {
+    background-color: var(--background-secondary-alt);
+    padding: 0.1em 0.3em;
+    border-radius: 4px;
+    font-family: var(--font-monospace);
 }
 
