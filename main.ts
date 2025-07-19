@@ -98,6 +98,20 @@ export default class SurveyNotePlugin extends Plugin {
 				});
 			})
 		);
+
+		// Listen for active leaf changes to manage tab bar buttons
+		this.registerEvent(
+			this.app.workspace.on('active-leaf-change', () => {
+				this.updateTabBarButtons();
+			})
+		);
+
+		// Listen for metadata cache changes to update tab bar buttons
+		this.registerEvent(
+			this.app.metadataCache.on('changed', () => {
+				this.updateTabBarButtons();
+			})
+		);
 	}
 
 	/**
@@ -160,6 +174,49 @@ export default class SurveyNotePlugin extends Plugin {
 			this.setSurveyNoteView(leaf);
 		} else if (leaf?.view instanceof SurveyNoteView) {
 			this.setMarkdownView(leaf);
+		}
+	}
+
+	/**
+	 * Update tab bar buttons based on current file properties
+	 */
+	updateTabBarButtons() {
+		const leaf = this.app.workspace.activeLeaf;
+		if (!leaf?.view || !(leaf.view instanceof MarkdownView)) {
+			return;
+		}
+
+		const file = leaf.view.file;
+		if (!file) {
+			return;
+		}
+
+		// Check if file has survey-note-view: note property
+		const fileCache = this.app.metadataCache.getFileCache(file);
+		const frontmatter = fileCache?.frontmatter;
+		const hasSurveyNoteProperty = frontmatter && frontmatter['survey-note-view'] === 'note';
+
+		const markdownView = leaf.view as MarkdownView;
+
+		// Remove existing action if it exists
+		const actions = (markdownView as any).actions as any[];
+		if (actions) {
+			const existingIndex = actions.findIndex((action: any) => action.id === 'surveynote-switch');
+			if (existingIndex >= 0) {
+				actions.splice(existingIndex, 1);
+			}
+		}
+
+		// Add SurveyNote button if property exists, using the same method as SurveyNoteView
+		if (hasSurveyNoteProperty) {
+			(markdownView as any).addAction('surveynote-icon', 'SurveyNote表示に切り替え', () => {
+				this.setSurveyNoteView(leaf);
+			});
+		}
+
+		// Force header update to reflect changes
+		if ((markdownView as any).updateHeader) {
+			(markdownView as any).updateHeader();
 		}
 	}
 }
