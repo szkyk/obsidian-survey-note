@@ -72,29 +72,310 @@ class MarkdownLinkWidget extends WidgetType {
     }
 }
 
+class ImageWidget extends WidgetType {
+    constructor(
+        private altText: string, 
+        private imagePath: string, 
+        private plugin: SurveyNotePlugin,
+        private width?: number,
+        private height?: number,
+        private align: 'left' | 'center' | 'right' = 'left'
+    ) {
+        super();
+    }
+
+    eq(other: ImageWidget) {
+        return other.altText === this.altText && 
+               other.imagePath === this.imagePath &&
+               other.width === this.width &&
+               other.height === this.height &&
+               other.align === this.align;
+    }
+
+    toDOM() {
+        console.log('Creating DOM element for image:', this.altText, this.imagePath, 'Size:', this.width, 'x', this.height, 'Align:', this.align);
+        const container = document.createElement('div');
+        container.className = `image-widget-container image-align-${this.align}`;
+        
+        const img = document.createElement('img');
+        img.className = 'image-widget';
+        img.alt = this.altText;
+        img.title = this.altText || this.imagePath;
+        img.style.borderRadius = '4px';
+        img.style.cursor = 'pointer';
+        
+        // Apply size constraints
+        if (this.width && this.height) {
+            console.log('Applying exact size:', this.width, 'x', this.height);
+            img.style.width = `${this.width}px`;
+            img.style.height = `${this.height}px`;
+            img.style.objectFit = 'cover'; // Maintain aspect ratio while fitting dimensions
+        } else if (this.width) {
+            console.log('Applying width only:', this.width);
+            img.style.width = `${this.width}px`;
+            img.style.height = 'auto';
+        } else if (this.height) {
+            console.log('Applying height only:', this.height);
+            img.style.height = `${this.height}px`;
+            img.style.width = 'auto';
+        } else {
+            // Default responsive behavior
+            img.style.maxWidth = '100%';
+            img.style.height = 'auto';
+        }
+        
+        // Try to resolve the image path
+        this.loadImage(img);
+        
+        img.addEventListener('click', (e) => {
+            console.log('Image clicked:', this.imagePath);
+            e.preventDefault();
+            // TODO: Open image in full size or image viewer
+        });
+        
+        img.addEventListener('error', () => {
+            console.log('Image failed to load:', this.imagePath);
+            img.style.display = 'none';
+            const fallback = document.createElement('span');
+            fallback.className = 'image-widget-fallback';
+            fallback.textContent = `📷 ${this.altText || this.imagePath}`;
+            fallback.style.color = 'var(--text-muted)';
+            fallback.style.fontStyle = 'italic';
+            container.appendChild(fallback);
+        });
+        
+        container.appendChild(img);
+        return container;
+    }
+
+    private async loadImage(img: HTMLImageElement) {
+        try {
+            console.log('Loading image with path:', this.imagePath);
+            
+            // First try to find the file in the vault by exact path
+            let file = this.plugin.app.vault.getAbstractFileByPath(this.imagePath);
+            console.log('Direct path lookup result:', !!file, file?.path);
+            
+            if (!file) {
+                // Try to resolve relative path from current file
+                const currentFile = this.plugin.app.workspace.getActiveFile();
+                if (currentFile) {
+                    const resolvedPath = this.plugin.app.metadataCache.getFirstLinkpathDest(this.imagePath, currentFile.path);
+                    if (resolvedPath instanceof TFile) {
+                        file = resolvedPath;
+                        console.log('Resolved via metadataCache:', file.path);
+                    }
+                }
+            }
+            
+            if (!file) {
+                // Try different path variations
+                const pathVariations = [
+                    this.imagePath,
+                    this.imagePath.startsWith('/') ? this.imagePath.slice(1) : '/' + this.imagePath,
+                    this.imagePath.replace(/^\.\//, ''),
+                    this.imagePath.replace(/^\//, '')
+                ];
+                
+                for (const variation of pathVariations) {
+                    const testFile = this.plugin.app.vault.getAbstractFileByPath(variation);
+                    if (testFile instanceof TFile) {
+                        file = testFile;
+                        console.log('Found with path variation:', variation, file.path);
+                        break;
+                    }
+                }
+            }
+            
+            if (file && file instanceof TFile) {
+                console.log('Loading image from vault file:', file.path);
+                const arrayBuffer = await this.plugin.app.vault.readBinary(file);
+                const blob = new Blob([arrayBuffer]);
+                const url = URL.createObjectURL(blob);
+                img.src = url;
+                
+                img.addEventListener('load', () => {
+                    console.log('Image loaded successfully from vault');
+                });
+                
+                // Clean up blob URL when image is removed from DOM
+                img.addEventListener('remove', () => {
+                    URL.revokeObjectURL(url);
+                });
+            } else {
+                // Try as external URL or data URI
+                console.log('Trying image as external URL:', this.imagePath);
+                if (this.imagePath.startsWith('http') || this.imagePath.startsWith('data:')) {
+                    img.src = this.imagePath;
+                } else {
+                    console.log('Image file not found in vault, triggering error');
+                    img.dispatchEvent(new Event('error'));
+                }
+            }
+        } catch (error) {
+            console.error('Error loading image:', error);
+            img.dispatchEvent(new Event('error'));
+        }
+    }
+}
+
 
 function createInternalLinkExtension(plugin: SurveyNotePlugin) {
     const internalLinkRegex = /\[\[([^\]]+)\]\]/g;
+    const internalImageRegex = /!\[\[([^\]]+)\]\]/g;
     const markdownLinkRegex = /\[([^\]]+)\]\(([^)]+)\)/g;
+    const imageRegex = /!\[([^\]]*)\]\(([^)]+)\)/g;
     const urlRegex = /(https?:\/\/[^\s]+)/g;
+    
+    function parseImageOptions(optionsStr: string): { 
+        width?: number; 
+        height?: number; 
+        align: 'left' | 'center' | 'right' 
+    } {
+        if (!optionsStr) return { align: 'left' };
+        
+        // Split by | to handle multiple options
+        const parts = optionsStr.split('|').map(part => part.trim()).filter(part => part);
+        
+        let width: number | undefined;
+        let height: number | undefined;
+        let align: 'left' | 'center' | 'right' = 'left';
+        
+        for (const part of parts) {
+            // Check if it's an alignment specification
+            if (['left', 'center', 'right'].includes(part.toLowerCase())) {
+                align = part.toLowerCase() as 'left' | 'center' | 'right';
+                console.log('Found align:', align);
+            }
+            // Check if it's a size specification
+            else {
+                const sizeMatch = part.match(/^(\d+)?(?:x(\d+))?$/);
+                if (sizeMatch) {
+                    width = sizeMatch[1] ? parseInt(sizeMatch[1], 10) : undefined;
+                    height = sizeMatch[2] ? parseInt(sizeMatch[2], 10) : undefined;
+                    console.log('Found size:', { width, height });
+                }
+            }
+        }
+        
+        return { width, height, align };
+    }
     
     function scanForLinks(text: string, selection?: { from: number; to: number }): Range<Decoration>[] {
         console.log('Scanning for links in text:', text, 'Selection:', selection);
         const newDecorations: Range<Decoration>[] = [];
         
-        // Store markdown link positions for URL scanning
+        // Store markdown link and image positions for URL scanning
         const markdownLinkRanges: Array<{from: number, to: number}> = [];
+        const imageRanges: Array<{from: number, to: number}> = [];
         
-        // Scan for internal links [[filename]]
+        // Scan for internal images first ![[filename|size]]
         let match;
+        internalImageRegex.lastIndex = 0;
+        while ((match = internalImageRegex.exec(text)) !== null) {
+            const from = match.index;
+            const to = match.index + match[0].length;
+            const fullContent = match[1];
+            
+            // Parse filename and options (align|size)
+            const parts = fullContent.split('|');
+            const filename = parts[0];
+            const optionsStr = parts.slice(1).join('|'); // Rejoin remaining parts
+            
+            imageRanges.push({from, to});
+            
+            console.log('Found internal image:', { match: match[0], filename, optionsStr, from, to });
+            
+            // Parse options (align and size)
+            const { width, height, align } = parseImageOptions(optionsStr);
+            console.log('Parsed options:', { width, height, align });
+            
+            // Check if cursor/selection is within this image range
+            const cursorInRange = selection && (
+                (selection.from >= from && selection.from <= to) ||
+                (selection.to >= from && selection.to <= to) ||
+                (selection.from <= from && selection.to >= to)
+            );
+            
+            if (cursorInRange) {
+                console.log('Cursor in internal image range, showing original text');
+                // Show original text when cursor is in range
+                const decoration = Decoration.mark({
+                    class: 'image-editing',
+                    attributes: {
+                        'data-image-path': filename,
+                        'data-alt-text': '',
+                        'title': `Image: ${filename}${optionsStr ? ` (${optionsStr})` : ''}`,
+                        'style': 'cursor: pointer; color: var(--text-accent); background-color: var(--background-modifier-hover);'
+                    }
+                });
+                newDecorations.push(decoration.range(from, to));
+            } else {
+                console.log('Cursor outside internal image range, showing image widget');
+                // Show image widget when cursor is outside range
+                const decoration = Decoration.replace({
+                    widget: new ImageWidget('', filename, plugin, width, height, align)
+                });
+                newDecorations.push(decoration.range(from, to));
+            }
+        }
+        
+        // Scan for markdown images ![alt](src)
+        imageRegex.lastIndex = 0;
+        while ((match = imageRegex.exec(text)) !== null) {
+            const from = match.index;
+            const to = match.index + match[0].length;
+            const altText = match[1];
+            const imagePath = match[2];
+            
+            imageRanges.push({from, to});
+            
+            console.log('Found image:', { match: match[0], altText, imagePath, from, to });
+            
+            // Check if cursor/selection is within this image range
+            const cursorInRange = selection && (
+                (selection.from >= from && selection.from <= to) ||
+                (selection.to >= from && selection.to <= to) ||
+                (selection.from <= from && selection.to >= to)
+            );
+            
+            if (cursorInRange) {
+                console.log('Cursor in image range, showing original text');
+                // Show original text when cursor is in range
+                const decoration = Decoration.mark({
+                    class: 'image-editing',
+                    attributes: {
+                        'data-image-path': imagePath,
+                        'data-alt-text': altText,
+                        'title': `Image: ${altText || imagePath}`,
+                        'style': 'cursor: pointer; color: var(--text-accent); background-color: var(--background-modifier-hover);'
+                    }
+                });
+                newDecorations.push(decoration.range(from, to));
+            } else {
+                console.log('Cursor outside image range, showing image widget');
+                // Show image widget when cursor is outside range
+                const decoration = Decoration.replace({
+                    widget: new ImageWidget(altText, imagePath, plugin, undefined, undefined, 'left')
+                });
+                newDecorations.push(decoration.range(from, to));
+            }
+        }
+        
+        // Scan for internal links [[filename]] (non-image links only)
         internalLinkRegex.lastIndex = 0;
         while ((match = internalLinkRegex.exec(text)) !== null) {
             const from = match.index;
             const to = match.index + match[0].length;
-            const filename = match[1];
+            const fullContent = match[1];
+            
+            // Parse filename
+            const parts = fullContent.split('|');
+            const filename = parts[0];
             
             console.log('Found internal link:', { match: match[0], filename, from, to });
             
+            // Always treat [[...]] as regular internal link (images use ![[...]])
             const decoration = Decoration.mark({
                 class: 'internal-link-mark',
                 attributes: {
@@ -150,9 +431,14 @@ function createInternalLinkExtension(plugin: SurveyNotePlugin) {
             }
         }
         
-        // Scan for standalone URLs (but not if they're already part of markdown links)
+        // Scan for standalone URLs (but not if they're already part of markdown links or images)
         const markdownLinkPositions = new Set<number>();
         markdownLinkRanges.forEach(range => {
+            for (let i = range.from; i < range.to; i++) {
+                markdownLinkPositions.add(i);
+            }
+        });
+        imageRanges.forEach(range => {
             for (let i = range.from; i < range.to; i++) {
                 markdownLinkPositions.add(i);
             }

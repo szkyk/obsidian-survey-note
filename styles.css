@@ -263,3 +263,57 @@
   background-color: var(--background-modifier-border) !important;
 }
 
+/* Image widget styling */
+.image-widget-container {
+  display: block;
+  margin: 0.5em 0;
+}
+
+/* Image alignment */
+.image-align-left {
+  text-align: left;
+}
+
+.image-align-center {
+  text-align: center;
+}
+
+.image-align-right {
+  text-align: right;
+}
+
+.image-widget {
+  max-width: 100% !important;
+  height: auto !important;
+  border-radius: 4px !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  transition: transform 0.2s ease;
+}
+
+.image-widget:hover {
+  transform: scale(1.02);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+}
+
+.image-widget-fallback {
+  display: inline-block;
+  padding: 1em;
+  border: 2px dashed var(--background-modifier-border);
+  border-radius: 4px;
+  color: var(--text-muted) !important;
+  font-style: italic !important;
+}
+
+/* Image editing mode styling */
+.image-editing {
+  color: var(--text-accent) !important;
+  cursor: pointer !important;
+  background-color: var(--background-modifier-hover) !important;
+  border-radius: 3px !important;
+  padding: 1px 2px !important;
+}
+
+.image-editing:hover {
+  background-color: var(--background-modifier-border) !important;
+}
+
