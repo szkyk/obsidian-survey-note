@@ -216,3 +216,14 @@
   border: 1px solid var(--background-modifier-border);
 }
 
+/* Internal link styling */
+.internal-link-mark {
+  color: var(--text-accent) !important;
+  cursor: pointer !important;
+  text-decoration: none !important;
+}
+
+.internal-link-mark:hover {
+  text-decoration: underline !important;
+}
+

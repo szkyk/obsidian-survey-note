@@ -1,10 +1,11 @@
 import { ItemView, WorkspaceLeaf, TFile, ViewStateResult, Notice } from "obsidian";
-import { EditorState } from "@codemirror/state";
-import { EditorView, keymap } from "@codemirror/view";
+import { EditorState, StateField, StateEffect, Transaction } from "@codemirror/state";
+import { EditorView, keymap, Decoration, DecorationSet, WidgetType } from "@codemirror/view";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { defaultKeymap, indentWithTab } from "@codemirror/commands";
-import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
+import { HighlightStyle, syntaxHighlighting, LanguageSupport } from "@codemirror/language";
 import { tags } from "@lezer/highlight";
+import { RangeSet, Range } from "@codemirror/state";
 import SurveyNotePlugin from "main";
 
 // A unique key to identify the view
@@ -30,6 +31,147 @@ const markdownHighlighting = HighlightStyle.define([
     { tag: tags.quote, class: "cm-quote" },
     { tag: tags.monospace, class: "cm-monospace" },
 ]);
+
+class InternalLinkWidget extends WidgetType {
+    constructor(private linkText: string, private filename: string, private plugin: SurveyNotePlugin) {
+        super();
+    }
+
+    eq(other: InternalLinkWidget) {
+        return other.linkText === this.linkText && other.filename === this.filename;
+    }
+
+    toDOM() {
+        console.log('Creating DOM element for link:', this.linkText);
+        const span = document.createElement('span');
+        span.className = 'internal-link';
+        span.textContent = this.linkText;
+        span.title = `Open "${this.filename}"`;
+        span.style.cursor = 'pointer';
+        span.style.color = 'var(--text-accent)';
+        span.style.textDecoration = 'none';
+        span.addEventListener('click', (e) => {
+            console.log('Internal link clicked:', this.filename);
+            e.preventDefault();
+            this.openFile();
+        });
+        span.addEventListener('mouseenter', () => {
+            span.style.textDecoration = 'underline';
+        });
+        span.addEventListener('mouseleave', () => {
+            span.style.textDecoration = 'none';
+        });
+        return span;
+    }
+
+    private async openFile() {
+        console.log('Opening file:', this.filename);
+        const targetFile = this.plugin.app.vault.getAbstractFileByPath(this.filename + '.md') || 
+                          this.plugin.app.metadataCache.getFirstLinkpathDest(this.filename, '');
+        
+        console.log('Target file found:', !!targetFile, targetFile?.path);
+        
+        if (targetFile instanceof TFile) {
+            const leaf = this.plugin.app.workspace.getUnpinnedLeaf();
+            console.log('Opening file in leaf');
+            await leaf.openFile(targetFile);
+        } else {
+            console.log('File not found:', this.filename);
+            new Notice(`File "${this.filename}" not found.`);
+        }
+    }
+}
+
+const internalLinkEffect = StateEffect.define<{from: number, to: number, filename: string}>();
+
+const internalLinkField = StateField.define<DecorationSet>({
+    create() {
+        console.log('Creating internal link field');
+        return Decoration.none;
+    },
+    update(decorations, transaction) {
+        console.log('Updating internal link field, effects:', transaction.effects.length);
+        decorations = decorations.map(transaction.changes);
+        
+        for (const effect of transaction.effects) {
+            if (effect.is(internalLinkEffect)) {
+                console.log('Processing internal link effect:', effect.value);
+                const { from, to, filename } = effect.value;
+                const plugin = (transaction.state as any).plugin;
+                console.log('Plugin available:', !!plugin);
+                if (plugin) {
+                    const decoration = Decoration.replace({
+                        widget: new InternalLinkWidget(`[[${filename}]]`, filename, plugin)
+                    });
+                    console.log('Adding decoration from', from, 'to', to);
+                    decorations = decorations.update({
+                        add: [decoration.range(from, to)]
+                    });
+                }
+            }
+        }
+        
+        return decorations;
+    },
+    provide: f => EditorView.decorations.from(f)
+});
+
+function createInternalLinkExtension(plugin: SurveyNotePlugin) {
+    const linkRegex = /\[\[([^\]]+)\]\]/g;
+    
+    function scanForLinks(text: string): Range<Decoration>[] {
+        console.log('Scanning for links in text:', text);
+        const newDecorations: Range<Decoration>[] = [];
+        let match;
+        linkRegex.lastIndex = 0;
+        
+        while ((match = linkRegex.exec(text)) !== null) {
+            const from = match.index;
+            const to = match.index + match[0].length;
+            const filename = match[1];
+            
+            console.log('Found link:', { match: match[0], filename, from, to });
+            
+            const decoration = Decoration.mark({
+                class: 'internal-link-mark',
+                attributes: {
+                    'data-filename': filename,
+                    'title': `Open "${filename}"`,
+                    'style': 'cursor: pointer; color: var(--text-accent); text-decoration: none;'
+                }
+            });
+            
+            newDecorations.push(decoration.range(from, to));
+        }
+        
+        console.log('Creating decorations:', newDecorations.length);
+        return newDecorations;
+    }
+
+    const linkField = StateField.define<DecorationSet>({
+        create(state) {
+            console.log('Creating link field with initial state');
+            const text = state.doc.toString();
+            const decorations = scanForLinks(text);
+            return Decoration.set(decorations);
+        },
+        update(decorations, tr) {
+            decorations = decorations.map(tr.changes);
+            
+            if (tr.docChanged) {
+                const text = tr.state.doc.toString();
+                console.log('Document changed, rescanning for links');
+                const newDecorations = scanForLinks(text);
+                decorations = Decoration.set(newDecorations);
+            }
+            
+            return decorations;
+        },
+        provide: f => EditorView.decorations.from(f)
+    });
+    
+    return [linkField];
+}
 
 export class SurveyNoteView extends ItemView {
     plugin: SurveyNotePlugin;
@@ -276,6 +418,7 @@ export class SurveyNoteView extends ItemView {
     }
 
     createGridItem(parent: HTMLElement, title: string, cls: string) {
+        console.log('Creating grid item:', title);
         const itemEl = parent.createDiv({ cls: `grid-item ${cls}` });
         const contentContainer = itemEl.createDiv({ cls: "grid-item-content" });
 
@@ -286,11 +429,13 @@ export class SurveyNoteView extends ItemView {
             }
         });
 
+        console.log('Creating editor state with internal link support');
         const state = EditorState.create({
             doc: this.editorData[title] || "",
             extensions: [
                 keymap.of([...defaultKeymap, indentWithTab]),
                 markdown({ base: markdownLanguage }),
+                ...createInternalLinkExtension(this.plugin),
                 EditorView.lineWrapping,
                 syntaxHighlighting(markdownHighlighting),
                 updateListener,
@@ -299,6 +444,49 @@ export class SurveyNoteView extends ItemView {
 
         const editor = new EditorView({ state, parent: contentContainer });
         this.editors[title] = editor;
+
+        // Add click handler for internal links
+        this.registerDomEvent(contentContainer, 'click', (event) => {
+            console.log('Click event detected:', event.target);
+            const target = event.target as HTMLElement;
+            console.log('Target classes:', target.className);
+            console.log('Target data-filename:', target.getAttribute('data-filename'));
+            
+            // Check if the clicked element or its parent has the internal-link-mark class
+            let linkElement: HTMLElement | null = null;
+            if (target.classList.contains('internal-link-mark')) {
+                linkElement = target;
+            } else {
+                linkElement = target.closest('.internal-link-mark') as HTMLElement;
+            }
+            
+            console.log('Link element found:', !!linkElement);
+            if (linkElement) {
+                const filename = linkElement.getAttribute('data-filename');
+                console.log('Filename from data attribute:', filename);
+                if (filename) {
+                    console.log('Internal link clicked via DOM event:', filename);
+                    event.preventDefault();
+                    event.stopPropagation();
+                    this.openInternalLink(filename);
+                }
+            }
+        });
+
+        // Add hover effects
+        this.registerDomEvent(contentContainer, 'mouseenter', (event) => {
+            const target = event.target as HTMLElement;
+            if (target.classList.contains('internal-link-mark')) {
+                target.style.textDecoration = 'underline';
+            }
+        }, true);
+
+        this.registerDomEvent(contentContainer, 'mouseleave', (event) => {
+            const target = event.target as HTMLElement;
+            if (target.classList.contains('internal-link-mark')) {
+                target.style.textDecoration = 'none';
+            }
+        }, true);
 
         // Use standard DOM event listeners on the parent container
         this.registerDomEvent(contentContainer, 'dragover', (event) => {
@@ -317,6 +505,23 @@ export class SurveyNoteView extends ItemView {
                 }
             }
         });
+    }
+
+    private async openInternalLink(filename: string) {
+        console.log('Opening internal link:', filename);
+        const targetFile = this.plugin.app.vault.getAbstractFileByPath(filename + '.md') || 
+                          this.plugin.app.metadataCache.getFirstLinkpathDest(filename, '');
+        
+        console.log('Target file found:', !!targetFile, targetFile?.path);
+        
+        if (targetFile instanceof TFile) {
+            const leaf = this.plugin.app.workspace.getUnpinnedLeaf();
+            console.log('Opening file in leaf');
+            await leaf.openFile(targetFile);
+        } else {
+            console.log('File not found:', filename);
+            new Notice(`File "${filename}" not found.`);
+        }
     }
 
     private async handleImageDrop(file: File, view: EditorView, title: string) {
