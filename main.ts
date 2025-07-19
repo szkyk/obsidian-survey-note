@@ -25,6 +25,7 @@ const DEFAULT_SETTINGS: SurveyNotePluginSettings = {
  */
 export default class SurveyNotePlugin extends Plugin {
 	settings: SurveyNotePluginSettings;
+	private viewedFiles: Set<string> = new Set();
 
 	/**
 	 * Plugin initialization
@@ -110,6 +111,15 @@ export default class SurveyNotePlugin extends Plugin {
 		this.registerEvent(
 			this.app.metadataCache.on('changed', () => {
 				this.updateTabBarButtons();
+			})
+		);
+
+		// Listen for file open events to auto-switch to SurveyNote view
+		this.registerEvent(
+			this.app.workspace.on('file-open', (file) => {
+				if (file) {
+					this.checkAndAutoSwitchToSurveyNote(file);
+				}
 			})
 		);
 	}
@@ -218,6 +228,37 @@ export default class SurveyNotePlugin extends Plugin {
 		if ((markdownView as any).updateHeader) {
 			(markdownView as any).updateHeader();
 		}
+	}
+
+	/**
+	 * Check if file has survey-note-view: note property and auto-switch to SurveyNote view
+	 * Only switches on the first time viewing the file
+	 */
+	checkAndAutoSwitchToSurveyNote(file: any) {
+		const filePath = file.path;
+		
+		// Check if this file has already been viewed in this session
+		if (this.viewedFiles.has(filePath)) {
+			return;
+		}
+
+		// Mark this file as viewed
+		this.viewedFiles.add(filePath);
+
+		// Wait a bit for metadata to be loaded
+		setTimeout(() => {
+			const fileCache = this.app.metadataCache.getFileCache(file);
+			const frontmatter = fileCache?.frontmatter;
+			const hasSurveyNoteProperty = frontmatter && frontmatter['survey-note-view'] === 'note';
+
+			if (hasSurveyNoteProperty) {
+				const leaf = this.app.workspace.activeLeaf;
+				// Only switch if current view is MarkdownView (not already SurveyNoteView)
+				if (leaf?.view instanceof MarkdownView && leaf.view.file === file) {
+					this.setSurveyNoteView(leaf);
+				}
+			}
+		}, 100); // Small delay to ensure metadata is loaded
 	}
 }
 
