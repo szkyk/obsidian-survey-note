@@ -32,31 +32,33 @@ const markdownHighlighting = HighlightStyle.define([
     { tag: tags.monospace, class: "cm-monospace" },
 ]);
 
-class InternalLinkWidget extends WidgetType {
-    constructor(private linkText: string, private filename: string, private plugin: SurveyNotePlugin) {
+class MarkdownLinkWidget extends WidgetType {
+    constructor(private linkText: string, private url: string) {
         super();
     }
 
-    eq(other: InternalLinkWidget) {
-        return other.linkText === this.linkText && other.filename === this.filename;
+    eq(other: MarkdownLinkWidget) {
+        return other.linkText === this.linkText && other.url === this.url;
     }
 
     toDOM() {
-        console.log('Creating DOM element for link:', this.linkText);
+        console.log('Creating DOM element for markdown link:', this.linkText, this.url);
         const span = document.createElement('span');
-        span.className = 'internal-link';
+        span.className = 'markdown-link-widget';
         span.textContent = this.linkText;
-        span.title = `Open "${this.filename}"`;
+        span.title = this.url;
         span.style.cursor = 'pointer';
         span.style.color = 'var(--text-accent)';
         span.style.textDecoration = 'none';
         span.addEventListener('click', (e) => {
-            console.log('Internal link clicked:', this.filename);
+            console.log('Markdown link clicked:', this.url);
             e.preventDefault();
-            this.openFile();
+            this.openUrl();
         });
         span.addEventListener('mouseenter', () => {
             span.style.textDecoration = 'underline';
+            // Show URL in a tooltip or status
+            span.title = this.url;
         });
         span.addEventListener('mouseleave', () => {
             span.style.textDecoration = 'none';
@@ -64,80 +66,116 @@ class InternalLinkWidget extends WidgetType {
         return span;
     }
 
-    private async openFile() {
-        console.log('Opening file:', this.filename);
-        const targetFile = this.plugin.app.vault.getAbstractFileByPath(this.filename + '.md') || 
-                          this.plugin.app.metadataCache.getFirstLinkpathDest(this.filename, '');
-        
-        console.log('Target file found:', !!targetFile, targetFile?.path);
-        
-        if (targetFile instanceof TFile) {
-            const leaf = this.plugin.app.workspace.getUnpinnedLeaf();
-            console.log('Opening file in leaf');
-            await leaf.openFile(targetFile);
-        } else {
-            console.log('File not found:', this.filename);
-            new Notice(`File "${this.filename}" not found.`);
-        }
+    private openUrl() {
+        console.log('Opening URL:', this.url);
+        window.open(this.url, '_blank');
     }
 }
 
-const internalLinkEffect = StateEffect.define<{from: number, to: number, filename: string}>();
-
-const internalLinkField = StateField.define<DecorationSet>({
-    create() {
-        console.log('Creating internal link field');
-        return Decoration.none;
-    },
-    update(decorations, transaction) {
-        console.log('Updating internal link field, effects:', transaction.effects.length);
-        decorations = decorations.map(transaction.changes);
-        
-        for (const effect of transaction.effects) {
-            if (effect.is(internalLinkEffect)) {
-                console.log('Processing internal link effect:', effect.value);
-                const { from, to, filename } = effect.value;
-                const plugin = (transaction.state as any).plugin;
-                console.log('Plugin available:', !!plugin);
-                if (plugin) {
-                    const decoration = Decoration.replace({
-                        widget: new InternalLinkWidget(`[[${filename}]]`, filename, plugin)
-                    });
-                    console.log('Adding decoration from', from, 'to', to);
-                    decorations = decorations.update({
-                        add: [decoration.range(from, to)]
-                    });
-                }
-            }
-        }
-        
-        return decorations;
-    },
-    provide: f => EditorView.decorations.from(f)
-});
 
 function createInternalLinkExtension(plugin: SurveyNotePlugin) {
-    const linkRegex = /\[\[([^\]]+)\]\]/g;
+    const internalLinkRegex = /\[\[([^\]]+)\]\]/g;
+    const markdownLinkRegex = /\[([^\]]+)\]\(([^)]+)\)/g;
+    const urlRegex = /(https?:\/\/[^\s]+)/g;
     
-    function scanForLinks(text: string): Range<Decoration>[] {
-        console.log('Scanning for links in text:', text);
+    function scanForLinks(text: string, selection?: { from: number; to: number }): Range<Decoration>[] {
+        console.log('Scanning for links in text:', text, 'Selection:', selection);
         const newDecorations: Range<Decoration>[] = [];
-        let match;
-        linkRegex.lastIndex = 0;
         
-        while ((match = linkRegex.exec(text)) !== null) {
+        // Store markdown link positions for URL scanning
+        const markdownLinkRanges: Array<{from: number, to: number}> = [];
+        
+        // Scan for internal links [[filename]]
+        let match;
+        internalLinkRegex.lastIndex = 0;
+        while ((match = internalLinkRegex.exec(text)) !== null) {
             const from = match.index;
             const to = match.index + match[0].length;
             const filename = match[1];
             
-            console.log('Found link:', { match: match[0], filename, from, to });
+            console.log('Found internal link:', { match: match[0], filename, from, to });
             
             const decoration = Decoration.mark({
                 class: 'internal-link-mark',
                 attributes: {
                     'data-filename': filename,
+                    'data-link-type': 'internal',
                     'title': `Open "${filename}"`,
                     'style': 'cursor: pointer; color: var(--text-accent); text-decoration: none;'
+                }
+            });
+            
+            newDecorations.push(decoration.range(from, to));
+        }
+        
+        // Scan for markdown links [name](url)
+        markdownLinkRegex.lastIndex = 0;
+        while ((match = markdownLinkRegex.exec(text)) !== null) {
+            const from = match.index;
+            const to = match.index + match[0].length;
+            const linkText = match[1];
+            const url = match[2];
+            
+            markdownLinkRanges.push({from, to});
+            
+            console.log('Found markdown link:', { match: match[0], linkText, url, from, to });
+            
+            // Check if cursor/selection is within this markdown link range
+            const cursorInRange = selection && (
+                (selection.from >= from && selection.from <= to) ||
+                (selection.to >= from && selection.to <= to) ||
+                (selection.from <= from && selection.to >= to)
+            );
+            
+            if (cursorInRange) {
+                console.log('Cursor in markdown link range, showing original text');
+                // Show original text when cursor is in range - use mark decoration
+                const decoration = Decoration.mark({
+                    class: 'markdown-link-editing',
+                    attributes: {
+                        'data-url': url,
+                        'data-link-type': 'markdown',
+                        'title': `Link: ${url}`,
+                        'style': 'cursor: pointer; color: var(--text-accent); background-color: var(--background-modifier-hover);'
+                    }
+                });
+                newDecorations.push(decoration.range(from, to));
+            } else {
+                console.log('Cursor outside markdown link range, showing widget');
+                // Show widget when cursor is outside range
+                const decoration = Decoration.replace({
+                    widget: new MarkdownLinkWidget(linkText, url)
+                });
+                newDecorations.push(decoration.range(from, to));
+            }
+        }
+        
+        // Scan for standalone URLs (but not if they're already part of markdown links)
+        const markdownLinkPositions = new Set<number>();
+        markdownLinkRanges.forEach(range => {
+            for (let i = range.from; i < range.to; i++) {
+                markdownLinkPositions.add(i);
+            }
+        });
+        
+        urlRegex.lastIndex = 0;
+        while ((match = urlRegex.exec(text)) !== null) {
+            const from = match.index;
+            const to = match.index + match[0].length;
+            const url = match[1];
+            
+            // Skip if this URL is part of a markdown link
+            if (markdownLinkPositions.has(from)) continue;
+            
+            console.log('Found standalone URL:', { match: match[0], url, from, to });
+            
+            const decoration = Decoration.mark({
+                class: 'url-link-mark',
+                attributes: {
+                    'data-url': url,
+                    'data-link-type': 'url',
+                    'title': `Open ${url}`,
+                    'style': 'cursor: pointer; color: var(--text-accent); text-decoration: underline;'
                 }
             });
             
@@ -152,16 +190,18 @@ function createInternalLinkExtension(plugin: SurveyNotePlugin) {
         create(state) {
             console.log('Creating link field with initial state');
             const text = state.doc.toString();
-            const decorations = scanForLinks(text);
+            const selection = state.selection.main;
+            const decorations = scanForLinks(text, selection);
             return Decoration.set(decorations);
         },
         update(decorations, tr) {
             decorations = decorations.map(tr.changes);
             
-            if (tr.docChanged) {
+            if (tr.docChanged || tr.selection) {
                 const text = tr.state.doc.toString();
-                console.log('Document changed, rescanning for links');
-                const newDecorations = scanForLinks(text);
+                const selection = tr.state.selection.main;
+                console.log('Document or selection changed, rescanning for links');
+                const newDecorations = scanForLinks(text, selection);
                 decorations = Decoration.set(newDecorations);
             }
             
@@ -445,14 +485,13 @@ export class SurveyNoteView extends ItemView {
         const editor = new EditorView({ state, parent: contentContainer });
         this.editors[title] = editor;
 
-        // Add click handler for internal links
+        // Add click handler for links
         this.registerDomEvent(contentContainer, 'click', (event) => {
             console.log('Click event detected:', event.target);
             const target = event.target as HTMLElement;
             console.log('Target classes:', target.className);
-            console.log('Target data-filename:', target.getAttribute('data-filename'));
             
-            // Check if the clicked element or its parent has the internal-link-mark class
+            // Check for internal links
             let linkElement: HTMLElement | null = null;
             if (target.classList.contains('internal-link-mark')) {
                 linkElement = target;
@@ -460,15 +499,59 @@ export class SurveyNoteView extends ItemView {
                 linkElement = target.closest('.internal-link-mark') as HTMLElement;
             }
             
-            console.log('Link element found:', !!linkElement);
             if (linkElement) {
-                const filename = linkElement.getAttribute('data-filename');
-                console.log('Filename from data attribute:', filename);
-                if (filename) {
-                    console.log('Internal link clicked via DOM event:', filename);
+                const linkType = linkElement.getAttribute('data-link-type');
+                console.log('Link type:', linkType);
+                
+                if (linkType === 'internal') {
+                    const filename = linkElement.getAttribute('data-filename');
+                    console.log('Filename from data attribute:', filename);
+                    if (filename) {
+                        console.log('Internal link clicked via DOM event:', filename);
+                        event.preventDefault();
+                        event.stopPropagation();
+                        this.openInternalLink(filename);
+                    }
+                }
+                return;
+            }
+            
+            // Check for URL links
+            let urlElement: HTMLElement | null = null;
+            if (target.classList.contains('url-link-mark')) {
+                urlElement = target;
+            } else {
+                urlElement = target.closest('.url-link-mark') as HTMLElement;
+            }
+            
+            if (urlElement) {
+                const url = urlElement.getAttribute('data-url');
+                console.log('URL from data attribute:', url);
+                if (url) {
+                    console.log('URL link clicked via DOM event:', url);
                     event.preventDefault();
                     event.stopPropagation();
-                    this.openInternalLink(filename);
+                    this.openUrl(url);
+                }
+                return;
+            }
+            
+            // Check for markdown links in editing mode
+            let markdownElement: HTMLElement | null = null;
+            if (target.classList.contains('markdown-link-editing')) {
+                markdownElement = target;
+            } else {
+                markdownElement = target.closest('.markdown-link-editing') as HTMLElement;
+            }
+            
+            if (markdownElement) {
+                const url = markdownElement.getAttribute('data-url');
+                console.log('Markdown link URL from data attribute:', url);
+                if (url) {
+                    console.log('Markdown link clicked via DOM event:', url);
+                    event.preventDefault();
+                    event.stopPropagation();
+                    this.openUrl(url);
                 }
             }
         });
@@ -522,6 +605,11 @@ export class SurveyNoteView extends ItemView {
             console.log('File not found:', filename);
             new Notice(`File "${filename}" not found.`);
         }
+    }
+
+    private openUrl(url: string) {
+        console.log('Opening URL in browser:', url);
+        window.open(url, '_blank');
     }
 
     private async handleImageDrop(file: File, view: EditorView, title: string) {
