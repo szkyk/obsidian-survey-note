@@ -412,3 +412,13 @@
   border-color: var(--interactive-accent) !important;
 }
 
+/* List bullet widget styling */
+.list-bullet-widget {
+  color: var(--text-normal) !important;
+  font-weight: bold !important;
+  user-select: none !important;
+  display: inline !important;
+  white-space: pre !important; /* Preserve spaces for indentation */
+  tab-size: 4 !important; /* Make tabs wider */
+}
+

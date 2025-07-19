@@ -72,6 +72,32 @@ class MarkdownLinkWidget extends WidgetType {
     }
 }
 
+class ListBulletWidget extends WidgetType {
+    constructor(private indent: string) {
+        super();
+    }
+
+    eq(other: ListBulletWidget) {
+        return other.indent === this.indent;
+    }
+
+    toDOM() {
+        const span = document.createElement('span');
+        span.className = 'list-bullet-widget';
+        
+        // Convert spaces to deeper indentation (multiply by 2 for deeper nesting)
+        const deeperIndent = this.indent.replace(/  /g, '    '); // Convert 2 spaces to 4 spaces
+        const tabIndent = this.indent.replace(/\t/g, '    '); // Convert tabs to 4 spaces
+        const finalIndent = deeperIndent || tabIndent;
+        
+        span.textContent = finalIndent + '· ';
+        span.style.color = 'var(--text-normal)';
+        span.style.fontWeight = 'normal';
+        span.style.userSelect = 'none';
+        return span;
+    }
+}
+
 class CodeBlockWidget extends WidgetType {
     constructor(private code: string, private language: string = '') {
         super();
@@ -296,6 +322,7 @@ function createInternalLinkExtension(plugin: SurveyNotePlugin) {
     const imageRegex = /!\[([^\]]*)\]\(([^)]+)\)/g;
     const codeBlockRegex = /```(\w*)\n?([\s\S]*?)\n?```/g;
     const urlRegex = /(https?:\/\/[^\s]+)/g;
+    const listItemRegex = /^(\s*)([-*])( +)/gm;
     
     function parseImageOptions(optionsStr: string): { 
         width?: number; 
@@ -335,10 +362,11 @@ function createInternalLinkExtension(plugin: SurveyNotePlugin) {
         console.log('Scanning for links in text:', text, 'Selection:', selection);
         const newDecorations: Range<Decoration>[] = [];
         
-        // Store markdown link, image, and code block positions for URL scanning
+        // Store markdown link, image, code block, and list item positions for URL scanning
         const markdownLinkRanges: Array<{from: number, to: number}> = [];
         const imageRanges: Array<{from: number, to: number}> = [];
         const codeBlockRanges: Array<{from: number, to: number}> = [];
+        const listItemRanges: Array<{from: number, to: number}> = [];
         
         // Scan for code blocks first ```language\ncode```
         let match;
@@ -380,6 +408,34 @@ function createInternalLinkExtension(plugin: SurveyNotePlugin) {
                 });
                 newDecorations.push(decoration.range(from, to));
             }
+        }
+        
+        // Scan for list items (- or * at the beginning of line with spaces)
+        listItemRegex.lastIndex = 0;
+        while ((match = listItemRegex.exec(text)) !== null) {
+            const from = match.index;
+            const to = match.index + match[0].length;
+            const indent = match[1]; // Leading spaces/tabs
+            const bullet = match[2]; // - or *
+            const spaces = match[3]; // Spaces after bullet
+            
+            listItemRanges.push({from, to});
+            
+            console.log('scanForLinks: Found list item:', { 
+                match: `"${match[0]}"`, 
+                indent: `"${indent}"`, 
+                bullet: `"${bullet}"`, 
+                spaces: `"${spaces}"`, 
+                from, 
+                to,
+                fullMatch: match[0].length
+            });
+            
+            // Replace the entire match (indent + bullet + spaces) with our custom widget
+            const decoration = Decoration.replace({
+                widget: new ListBulletWidget(indent)
+            });
+            newDecorations.push(decoration.range(from, to));
         }
         
         // Scan for internal images ![[filename|size]]
@@ -481,8 +537,8 @@ function createInternalLinkExtension(plugin: SurveyNotePlugin) {
             const to = match.index + match[0].length;
             const fullContent = match[1];
             
-            // Skip if this position overlaps with an image or code block range
-            const overlapsWithSpecial = [...imageRanges, ...codeBlockRanges].some(range => 
+            // Skip if this position overlaps with an image, code block, or list item range
+            const overlapsWithSpecial = [...imageRanges, ...codeBlockRanges, ...listItemRanges].some(range => 
                 (from >= range.from && from < range.to) || 
                 (to > range.from && to <= range.to) ||
                 (from <= range.from && to >= range.to)
@@ -555,7 +611,7 @@ function createInternalLinkExtension(plugin: SurveyNotePlugin) {
             }
         }
         
-        // Scan for standalone URLs (but not if they're already part of markdown links, images, or code blocks)
+        // Scan for standalone URLs (but not if they're already part of markdown links, images, code blocks, or list items)
         const excludedPositions = new Set<number>();
         markdownLinkRanges.forEach(range => {
             for (let i = range.from; i < range.to; i++) {
@@ -568,6 +624,11 @@ function createInternalLinkExtension(plugin: SurveyNotePlugin) {
             }
         });
         codeBlockRanges.forEach(range => {
+            for (let i = range.from; i < range.to; i++) {
+                excludedPositions.add(i);
+            }
+        });
+        listItemRanges.forEach(range => {
             for (let i = range.from; i < range.to; i++) {
                 excludedPositions.add(i);
             }
@@ -629,6 +690,270 @@ function createInternalLinkExtension(plugin: SurveyNotePlugin) {
     });
     
     return [linkField];
+}
+
+function createListInputHandler() {
+    function handleInput(view: EditorView, from: number, to: number, text: string): boolean {
+        console.log('handleInput: Input handler called:', { 
+            from, 
+            to, 
+            text: `"${text}"`, 
+            charCode: text.charCodeAt(0),
+            length: text.length 
+        });
+        
+        // Check if space was just typed
+        if (text === ' ') {
+            const doc = view.state.doc;
+            const line = doc.lineAt(from);
+            const lineText = line.text;
+            const pos = from - line.from;
+            
+            console.log('handleInput: Space typed at position:', pos, 'in line:', `"${lineText}"`);
+            console.log('handleInput: Current line length:', lineText.length, 'cursor relative pos:', pos);
+            
+            // Check if we're after - or * at the beginning of a line
+            if (pos >= 1) {
+                const beforeCursor = lineText.substring(0, pos);
+                console.log('handleInput: Text before cursor:', `"${beforeCursor}"`);
+                
+                const match = beforeCursor.match(/^(\s*)([-*])$/);
+                
+                if (match) {
+                    const indent = match[1];
+                    const bullet = match[2];
+                    
+                    console.log('handleInput: MATCHED! Converting list item:', { 
+                        indent: `"${indent}"`, 
+                        bullet: `"${bullet}"`,
+                        indentLength: indent.length,
+                        totalMatch: `"${match[0]}"`
+                    });
+                    
+                    // Replace the bullet with bullet + space to create the list pattern
+                    const lineStart = line.from;
+                    const bulletStart = lineStart + indent.length;
+                    const bulletEnd = lineStart + beforeCursor.length;
+                    
+                    console.log('handleInput: Making change:', {
+                        lineStart,
+                        bulletStart,
+                        bulletEnd,
+                        replacing: `"${lineText.substring(indent.length, pos)}"`,
+                        with: `"${bullet} "`
+                    });
+                    
+                    view.dispatch({
+                        changes: {
+                            from: bulletStart,
+                            to: bulletEnd,
+                            insert: bullet + ' '
+                        },
+                        selection: { anchor: bulletStart + 2 } // Position after the bullet and space
+                    });
+                    
+                    console.log('handleInput: Change dispatched, preventing space insertion');
+                    return true; // Prevent the space from being inserted again
+                } else {
+                    console.log('handleInput: No match for list pattern');
+                }
+            } else {
+                console.log('handleInput: Position too early for list pattern');
+            }
+        } else {
+            console.log('handleInput: Not a space character');
+        }
+        
+        return false; // Allow default behavior
+    }
+    
+    function handleBackspace(view: EditorView): boolean {
+        const { state } = view;
+        const { from, to } = state.selection.main;
+        
+        // Only handle when cursor is at a single position (not a selection)
+        if (from !== to) return false;
+        
+        const doc = state.doc;
+        const line = doc.lineAt(from);
+        const lineText = line.text;
+        const pos = from - line.from;
+        
+        console.log('handleBackspace: Backspace at position:', pos, 'in line:', `"${lineText}"`);
+        
+        // Check if we're at the beginning of a line that could have a list widget
+        if (pos === 0 && lineText.length > 0) {
+            // Check if this line would be displayed with a list widget
+            // (i.e., it matches the pattern that would create a list widget)
+            const listMatch = lineText.match(/^(\s*)(.+)$/);
+            if (listMatch) {
+                const indent = listMatch[1];
+                const content = listMatch[2];
+                
+                console.log('handleBackspace: Line analysis:', {
+                    indent: `"${indent}"`,
+                    content: `"${content}"`,
+                    hasContent: content.trim().length > 0
+                });
+                
+                // Check if this looks like a line that would have a list widget
+                // by seeing if it matches our list detection pattern when reconstructed
+                const reconstructed = indent + '- ' + content;
+                const testMatch = reconstructed.match(/^(\s*)([-*])(\s+)/);
+                
+                console.log('handleBackspace: Testing reconstruction:', {
+                    reconstructed: `"${reconstructed}"`,
+                    testMatch: !!testMatch
+                });
+                
+                if (testMatch && content.trim().length > 0) {
+                    console.log('handleBackspace: MATCHED! Converting back to regular list with indent:', `"${indent}"`);
+                    
+                    view.dispatch({
+                        changes: {
+                            from: line.from,
+                            to: line.from + indent.length,
+                            insert: indent + '- '
+                        },
+                        selection: { anchor: line.from + indent.length + 2 }
+                    });
+                    
+                    return true; // Prevent default backspace
+                } else {
+                    console.log('handleBackspace: No match for list reconstruction');
+                }
+            } else {
+                console.log('handleBackspace: No line match');
+            }
+        } else {
+            console.log('handleBackspace: Not at beginning of line or empty line');
+        }
+        
+        return false; // Allow default behavior
+    }
+    
+    function handleEnter(view: EditorView): boolean {
+        const { state } = view;
+        const { from, to } = state.selection.main;
+        
+        // Only handle when cursor is at a single position
+        if (from !== to) return false;
+        
+        const doc = state.doc;
+        const line = doc.lineAt(from);
+        const lineText = line.text;
+        const pos = from - line.from;
+        
+        console.log('handleEnter: Enter pressed at position:', pos, 'in line:', `"${lineText}"`);
+        
+        // Check if we're on a line that has list content
+        const listMatch = lineText.match(/^(\s*)(.*)$/);
+        if (listMatch) {
+            const indent = listMatch[1];
+            const content = listMatch[2].trim();
+            
+            console.log('handleEnter: Line analysis:', {
+                indent: `"${indent}"`,
+                content: `"${content}"`,
+                hasContent: content.length > 0,
+                posAfterIndent: pos >= indent.length
+            });
+            
+            // If we're on a list line (has content) and not at the very beginning
+            if (content.length > 0 && pos >= indent.length) {
+                console.log('handleEnter: Creating new list item with indent:', `"${indent}"`);
+                
+                view.dispatch({
+                    changes: {
+                        from: from,
+                        to: to,
+                        insert: '\n' + indent
+                    },
+                    selection: { anchor: from + 1 + indent.length }
+                });
+                
+                return true; // Prevent default enter behavior
+            } else {
+                console.log('handleEnter: Not creating list item - no content or at beginning');
+            }
+        } else {
+            console.log('handleEnter: No line match');
+        }
+        
+        return false; // Allow default behavior
+    }
+    
+    function handleTab(view: EditorView): boolean {
+        const { state } = view;
+        const { from, to } = state.selection.main;
+        
+        // Only handle when cursor is at a single position
+        if (from !== to) return false;
+        
+        const doc = state.doc;
+        const line = doc.lineAt(from);
+        const lineText = line.text;
+        const pos = from - line.from;
+        
+        console.log('handleTab: Tab pressed at position:', pos, 'in line:', `"${lineText}"`);
+        
+        // Check if we're at the beginning of a line or within the indent area
+        const lineStart = line.from;
+        const indentMatch = lineText.match(/^(\s*)/);
+        
+        if (indentMatch) {
+            const currentIndent = indentMatch[1];
+            const indentEnd = currentIndent.length;
+            
+            console.log('handleTab: Current indent analysis:', {
+                currentIndent: `"${currentIndent}"`,
+                indentEnd,
+                cursorPos: pos,
+                atBeginningOrIndent: pos <= indentEnd
+            });
+            
+            // If we're at the beginning of the line or within the indent area
+            if (pos <= indentEnd) {
+                // Add 4 spaces for deeper indentation
+                const newIndent = '    ';
+                
+                console.log('handleTab: Adding deeper indentation:', `"${newIndent}"`);
+                
+                view.dispatch({
+                    changes: {
+                        from: lineStart,
+                        to: lineStart + currentIndent.length,
+                        insert: currentIndent + newIndent
+                    },
+                    selection: { anchor: lineStart + currentIndent.length + newIndent.length }
+                });
+                
+                return true; // Prevent default tab behavior
+            } else {
+                console.log('handleTab: Not at beginning/indent area, allowing default behavior');
+            }
+        }
+        
+        return false; // Allow default behavior
+    }
+
+    return [
+        EditorView.inputHandler.of(handleInput),
+        keymap.of([
+            {
+                key: "Backspace",
+                run: handleBackspace
+            },
+            {
+                key: "Enter",
+                run: handleEnter
+            },
+            {
+                key: "Tab",
+                run: handleTab
+            }
+        ])
+    ];
 }
 
 export class SurveyNoteView extends ItemView {
@@ -887,13 +1212,14 @@ export class SurveyNoteView extends ItemView {
             }
         });
 
-        console.log('Creating editor state with internal link support');
+        console.log('Creating editor state with internal link support and list input handler');
         const state = EditorState.create({
             doc: this.editorData[title] || "",
             extensions: [
                 keymap.of([...defaultKeymap, indentWithTab]),
                 markdown({ base: markdownLanguage }),
                 ...createInternalLinkExtension(this.plugin),
+                ...createListInputHandler(),
                 EditorView.lineWrapping,
                 syntaxHighlighting(markdownHighlighting),
                 updateListener,
