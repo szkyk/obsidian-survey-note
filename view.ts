@@ -369,6 +369,18 @@ function createInternalLinkExtension(plugin: SurveyNotePlugin) {
             const to = match.index + match[0].length;
             const fullContent = match[1];
             
+            // Skip if this position overlaps with an image range
+            const overlapsWithImage = imageRanges.some(range => 
+                (from >= range.from && from < range.to) || 
+                (to > range.from && to <= range.to) ||
+                (from <= range.from && to >= range.to)
+            );
+            
+            if (overlapsWithImage) {
+                console.log('Skipping internal link that overlaps with image:', match[0]);
+                continue;
+            }
+            
             // Parse filename
             const parts = fullContent.split('|');
             const filename = parts[0];
@@ -432,15 +444,15 @@ function createInternalLinkExtension(plugin: SurveyNotePlugin) {
         }
         
         // Scan for standalone URLs (but not if they're already part of markdown links or images)
-        const markdownLinkPositions = new Set<number>();
+        const excludedPositions = new Set<number>();
         markdownLinkRanges.forEach(range => {
             for (let i = range.from; i < range.to; i++) {
-                markdownLinkPositions.add(i);
+                excludedPositions.add(i);
             }
         });
         imageRanges.forEach(range => {
             for (let i = range.from; i < range.to; i++) {
-                markdownLinkPositions.add(i);
+                excludedPositions.add(i);
             }
         });
         
@@ -450,8 +462,8 @@ function createInternalLinkExtension(plugin: SurveyNotePlugin) {
             const to = match.index + match[0].length;
             const url = match[1];
             
-            // Skip if this URL is part of a markdown link
-            if (markdownLinkPositions.has(from)) continue;
+            // Skip if this URL is part of a markdown link or image
+            if (excludedPositions.has(from)) continue;
             
             console.log('Found standalone URL:', { match: match[0], url, from, to });
             
@@ -467,6 +479,9 @@ function createInternalLinkExtension(plugin: SurveyNotePlugin) {
             
             newDecorations.push(decoration.range(from, to));
         }
+        
+        // Sort decorations by position to avoid the "Ranges must be added sorted" error
+        newDecorations.sort((a, b) => a.from - b.from);
         
         console.log('Creating decorations:', newDecorations.length);
         return newDecorations;
