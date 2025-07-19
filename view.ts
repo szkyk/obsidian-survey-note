@@ -86,6 +86,27 @@ class CodeBlockWidget extends WidgetType {
         const container = document.createElement('div');
         container.className = 'code-block-widget-container';
         
+        // Add copy button
+        const copyButton = document.createElement('button');
+        copyButton.className = 'code-block-copy-button';
+        copyButton.innerHTML = '📋'; // Copy icon
+        copyButton.title = 'Copy code';
+        copyButton.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            console.log('Copy button clicked');
+            navigator.clipboard.writeText(this.code).then(() => {
+                console.log('Code copied to clipboard');
+                // Show brief feedback
+                copyButton.innerHTML = '✓';
+                setTimeout(() => {
+                    copyButton.innerHTML = '📋';
+                }, 1000);
+            }).catch(err => {
+                console.error('Failed to copy code:', err);
+            });
+        });
+        
         const pre = document.createElement('pre');
         pre.className = 'code-block-widget';
         
@@ -113,6 +134,7 @@ class CodeBlockWidget extends WidgetType {
         container.title = 'Click to edit code block';
         
         pre.appendChild(code);
+        container.appendChild(copyButton);
         container.appendChild(pre);
         
         return container;
