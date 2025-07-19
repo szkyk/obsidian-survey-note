@@ -72,6 +72,53 @@ class MarkdownLinkWidget extends WidgetType {
     }
 }
 
+class CodeBlockWidget extends WidgetType {
+    constructor(private code: string, private language: string = '') {
+        super();
+    }
+
+    eq(other: CodeBlockWidget) {
+        return other.code === this.code && other.language === this.language;
+    }
+
+    toDOM() {
+        console.log('Creating DOM element for code block:', this.language, this.code.length, 'chars');
+        const container = document.createElement('div');
+        container.className = 'code-block-widget-container';
+        
+        const pre = document.createElement('pre');
+        pre.className = 'code-block-widget';
+        
+        const code = document.createElement('code');
+        if (this.language) {
+            code.className = `language-${this.language}`;
+        }
+        code.textContent = this.code;
+        
+        // Make the code block clickable to focus and allow cursor positioning
+        container.addEventListener('click', (e) => {
+            console.log('Code block clicked, focusing for editing');
+            e.preventDefault();
+            e.stopPropagation();
+            
+            // Dispatch a custom event to signal that we want to edit this code block
+            const customEvent = new CustomEvent('editCodeBlock', {
+                detail: { target: container },
+                bubbles: true
+            });
+            container.dispatchEvent(customEvent);
+        });
+        
+        container.style.cursor = 'text';
+        container.title = 'Click to edit code block';
+        
+        pre.appendChild(code);
+        container.appendChild(pre);
+        
+        return container;
+    }
+}
+
 class ImageWidget extends WidgetType {
     constructor(
         private altText: string, 
@@ -225,6 +272,7 @@ function createInternalLinkExtension(plugin: SurveyNotePlugin) {
     const internalImageRegex = /!\[\[([^\]]+)\]\]/g;
     const markdownLinkRegex = /\[([^\]]+)\]\(([^)]+)\)/g;
     const imageRegex = /!\[([^\]]*)\]\(([^)]+)\)/g;
+    const codeBlockRegex = /```(\w*)\n?([\s\S]*?)\n?```/g;
     const urlRegex = /(https?:\/\/[^\s]+)/g;
     
     function parseImageOptions(optionsStr: string): { 
@@ -265,12 +313,54 @@ function createInternalLinkExtension(plugin: SurveyNotePlugin) {
         console.log('Scanning for links in text:', text, 'Selection:', selection);
         const newDecorations: Range<Decoration>[] = [];
         
-        // Store markdown link and image positions for URL scanning
+        // Store markdown link, image, and code block positions for URL scanning
         const markdownLinkRanges: Array<{from: number, to: number}> = [];
         const imageRanges: Array<{from: number, to: number}> = [];
+        const codeBlockRanges: Array<{from: number, to: number}> = [];
         
-        // Scan for internal images first ![[filename|size]]
+        // Scan for code blocks first ```language\ncode```
         let match;
+        codeBlockRegex.lastIndex = 0;
+        while ((match = codeBlockRegex.exec(text)) !== null) {
+            const from = match.index;
+            const to = match.index + match[0].length;
+            const language = match[1] || '';
+            const code = match[2] || '';
+            
+            codeBlockRanges.push({from, to});
+            
+            console.log('Found code block:', { match: match[0], language, codeLength: code.length, from, to });
+            
+            // Check if cursor/selection is within this code block range
+            const cursorInRange = selection && (
+                (selection.from >= from && selection.from <= to) ||
+                (selection.to >= from && selection.to <= to) ||
+                (selection.from <= from && selection.to >= to)
+            );
+            
+            if (cursorInRange) {
+                console.log('Cursor in code block range, showing original text');
+                // Show original text when cursor is in range
+                const decoration = Decoration.mark({
+                    class: 'code-block-editing',
+                    attributes: {
+                        'data-language': language,
+                        'title': `Code block${language ? ` (${language})` : ''}`,
+                        'style': 'cursor: text; background-color: var(--background-modifier-hover);'
+                    }
+                });
+                newDecorations.push(decoration.range(from, to));
+            } else {
+                console.log('Cursor outside code block range, showing code widget');
+                // Show code block widget when cursor is outside range
+                const decoration = Decoration.replace({
+                    widget: new CodeBlockWidget(code, language)
+                });
+                newDecorations.push(decoration.range(from, to));
+            }
+        }
+        
+        // Scan for internal images ![[filename|size]]
         internalImageRegex.lastIndex = 0;
         while ((match = internalImageRegex.exec(text)) !== null) {
             const from = match.index;
@@ -369,15 +459,15 @@ function createInternalLinkExtension(plugin: SurveyNotePlugin) {
             const to = match.index + match[0].length;
             const fullContent = match[1];
             
-            // Skip if this position overlaps with an image range
-            const overlapsWithImage = imageRanges.some(range => 
+            // Skip if this position overlaps with an image or code block range
+            const overlapsWithSpecial = [...imageRanges, ...codeBlockRanges].some(range => 
                 (from >= range.from && from < range.to) || 
                 (to > range.from && to <= range.to) ||
                 (from <= range.from && to >= range.to)
             );
             
-            if (overlapsWithImage) {
-                console.log('Skipping internal link that overlaps with image:', match[0]);
+            if (overlapsWithSpecial) {
+                console.log('Skipping internal link that overlaps with special content:', match[0]);
                 continue;
             }
             
@@ -443,7 +533,7 @@ function createInternalLinkExtension(plugin: SurveyNotePlugin) {
             }
         }
         
-        // Scan for standalone URLs (but not if they're already part of markdown links or images)
+        // Scan for standalone URLs (but not if they're already part of markdown links, images, or code blocks)
         const excludedPositions = new Set<number>();
         markdownLinkRanges.forEach(range => {
             for (let i = range.from; i < range.to; i++) {
@@ -451,6 +541,11 @@ function createInternalLinkExtension(plugin: SurveyNotePlugin) {
             }
         });
         imageRanges.forEach(range => {
+            for (let i = range.from; i < range.to; i++) {
+                excludedPositions.add(i);
+            }
+        });
+        codeBlockRanges.forEach(range => {
             for (let i = range.from; i < range.to; i++) {
                 excludedPositions.add(i);
             }
@@ -785,6 +880,44 @@ export class SurveyNoteView extends ItemView {
 
         const editor = new EditorView({ state, parent: contentContainer });
         this.editors[title] = editor;
+
+        // Add code block edit handler using standard addEventListener
+        contentContainer.addEventListener('editCodeBlock', (event: Event) => {
+            console.log('Edit code block event received');
+            const customEvent = event as CustomEvent;
+            const codeBlockContainer = customEvent.detail.target;
+            
+            // Find the position of this code block in the editor
+            const editorElement = contentContainer.querySelector('.cm-editor');
+            if (editorElement && codeBlockContainer) {
+                // Focus the editor and try to position cursor at the code block
+                editor.focus();
+                
+                // We'll search for the code block pattern in the text and position cursor there
+                const text = editor.state.doc.toString();
+                const codeBlockRegex = /```[\w]*\n?[\s\S]*?\n?```/g;
+                let match;
+                let blockIndex = 0;
+                
+                // Find all code blocks and determine which one was clicked
+                const allCodeBlocks = contentContainer.querySelectorAll('.code-block-widget-container');
+                const clickedIndex = Array.from(allCodeBlocks).indexOf(codeBlockContainer);
+                
+                while ((match = codeBlockRegex.exec(text)) !== null && blockIndex <= clickedIndex) {
+                    if (blockIndex === clickedIndex) {
+                        // Position cursor at the start of this code block
+                        const pos = match.index + 3; // Position after the opening ```
+                        editor.dispatch({
+                            selection: { anchor: pos, head: pos },
+                            scrollIntoView: true
+                        });
+                        console.log('Cursor positioned at code block', blockIndex, 'position', pos);
+                        break;
+                    }
+                    blockIndex++;
+                }
+            }
+        });
 
         // Add click handler for links
         this.registerDomEvent(contentContainer, 'click', (event) => {

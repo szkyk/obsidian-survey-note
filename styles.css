@@ -317,3 +317,75 @@
   background-color: var(--background-modifier-border) !important;
 }
 
+/* Code block widget styling */
+.code-block-widget-container {
+  display: block !important;
+  margin: 1em 0 !important;
+  background-color: var(--background-primary-alt) !important;
+  border: 1px solid var(--background-modifier-border) !important;
+  border-radius: 6px !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+}
+
+.code-block-widget {
+  background-color: var(--background-primary-alt) !important;
+  border: none !important;
+  border-radius: 0 !important;
+  padding: 1em !important;
+  margin: 0 !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  font-family: var(--font-monospace) !important;
+  font-size: 0.9em !important;
+  line-height: 1.4 !important;
+  white-space: pre-wrap !important;
+  word-wrap: break-word !important;
+  word-break: break-all !important;
+  display: block !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  box-sizing: border-box !important;
+  min-height: 2em !important;
+}
+
+.code-block-widget code {
+  background: transparent !important;
+  border: none !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  font-family: inherit !important;
+  font-size: inherit !important;
+  color: var(--text-normal) !important;
+  white-space: pre-wrap !important;
+  word-wrap: break-word !important;
+  word-break: break-all !important;
+  display: block !important;
+  width: 100% !important;
+  max-width: 100% !important;
+}
+
+/* Override any CodeMirror line styling within code blocks */
+.code-block-widget-container * {
+  background-color: inherit !important;
+}
+
+.code-block-widget-container .cm-line {
+  background-color: transparent !important;
+}
+
+.code-block-widget-container .cm-content {
+  background-color: transparent !important;
+}
+
+/* Code block editing mode styling */
+.code-block-editing {
+  background-color: var(--background-modifier-hover) !important;
+  border-radius: 3px !important;
+  padding: 1px 2px !important;
+}
+
+.code-block-editing:hover {
+  background-color: var(--background-modifier-border) !important;
+}
+
