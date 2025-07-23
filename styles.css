@@ -413,12 +413,55 @@
 }
 
 /* List bullet widget styling */
+.list-bullet-widget-container {
+  display: inline-flex !important;
+  align-items: center !important;
+  user-select: none !important;
+  white-space: pre !important; /* Preserve spaces for indentation */
+  tab-size: 4 !important; /* Make tabs wider */
+}
+
 .list-bullet-widget {
   color: var(--text-normal) !important;
   font-weight: bold !important;
+  font-size: 1.2em !important;
   user-select: none !important;
   display: inline !important;
-  white-space: pre !important; /* Preserve spaces for indentation */
-  tab-size: 4 !important; /* Make tabs wider */
+}
+
+.list-chevron {
+  cursor: pointer !important;
+  margin-right: 4px !important;
+  margin-left: -8px !important; /* Less aggressive left movement */
+  font-size: 0.8em !important;
+  color: var(--text-muted) !important;
+  transition: transform 0.2s ease, color 0.2s ease !important;
+  user-select: none !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 16px !important; /* Increased width for better click area */
+  height: 16px !important; /* Increased height for better click area */
+  border-radius: 2px !important;
+  position: relative !important;
+  z-index: 10 !important;
+  /* Remove float to ensure proper positioning */
+}
+
+.list-chevron:hover {
+  color: var(--text-normal) !important;
+  background-color: var(--background-modifier-hover) !important;
+  transform: scale(1.1) !important;
+}
+
+.list-chevron:active {
+  transform: scale(0.95) !important;
+  background-color: var(--background-modifier-border) !important;
+}
+
+/* Hide collapse state markers */
+.collapse-state-marker {
+  display: none !important;
+  visibility: hidden !important;
 }
 

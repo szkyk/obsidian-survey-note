@@ -2,7 +2,7 @@ import { ItemView, WorkspaceLeaf, TFile, ViewStateResult, Notice } from "obsidia
 import { EditorState, StateField, StateEffect, Transaction } from "@codemirror/state";
 import { EditorView, keymap, Decoration, DecorationSet, WidgetType } from "@codemirror/view";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
-import { defaultKeymap, indentWithTab } from "@codemirror/commands";
+import { defaultKeymap, indentWithTab, undo, redo, undoDepth, redoDepth, history, historyKeymap } from "@codemirror/commands";
 import { HighlightStyle, syntaxHighlighting, LanguageSupport } from "@codemirror/language";
 import { tags } from "@lezer/highlight";
 import { RangeSet, Range } from "@codemirror/state";
@@ -73,28 +73,108 @@ class MarkdownLinkWidget extends WidgetType {
 }
 
 class ListBulletWidget extends WidgetType {
-    constructor(private indent: string) {
+    constructor(
+        private indent: string, 
+        private hasChildren: boolean = false, 
+        private isCollapsed: boolean = false,
+        private lineNumber: number = 0
+    ) {
         super();
     }
 
     eq(other: ListBulletWidget) {
-        return other.indent === this.indent;
+        return other.indent === this.indent && 
+               other.hasChildren === this.hasChildren && 
+               other.isCollapsed === this.isCollapsed &&
+               other.lineNumber === this.lineNumber;
     }
 
     toDOM() {
-        const span = document.createElement('span');
-        span.className = 'list-bullet-widget';
+        const container = document.createElement('span');
+        container.className = 'list-bullet-widget-container';
+        container.style.display = 'inline-flex';
+        container.style.alignItems = 'center';
+        container.style.userSelect = 'none';
         
-        // Convert spaces to deeper indentation (multiply by 2 for deeper nesting)
-        const deeperIndent = this.indent.replace(/  /g, '    '); // Convert 2 spaces to 4 spaces
-        const tabIndent = this.indent.replace(/\t/g, '    '); // Convert tabs to 4 spaces
+        // Convert spaces to deeper indentation
+        const deeperIndent = this.indent.replace(/  /g, '    ');
+        const tabIndent = this.indent.replace(/\t/g, '    ');
         const finalIndent = deeperIndent || tabIndent;
         
-        span.textContent = finalIndent + '· ';
-        span.style.color = 'var(--text-normal)';
-        span.style.fontWeight = 'normal';
-        span.style.userSelect = 'none';
-        return span;
+        // Add indent spacing
+        if (finalIndent) {
+            const indentSpan = document.createElement('span');
+            indentSpan.textContent = finalIndent;
+            indentSpan.style.whiteSpace = 'pre';
+            container.appendChild(indentSpan);
+        }
+        
+        // Add chevron if has children
+        if (this.hasChildren) {
+            const chevron = document.createElement('span');
+            chevron.className = 'list-chevron';
+            chevron.textContent = this.isCollapsed ? '▶' : '▼';
+            chevron.style.cursor = 'pointer';
+            chevron.style.marginRight = '4px';
+            chevron.style.marginLeft = '-8px'; // Move slightly left but not too much
+            chevron.style.fontSize = '0.8em';
+            chevron.style.color = 'var(--text-muted)';
+            chevron.style.transition = 'transform 0.2s ease, color 0.2s ease';
+            chevron.style.userSelect = 'none';
+            chevron.style.display = 'inline-flex';
+            chevron.style.alignItems = 'center';
+            chevron.style.justifyContent = 'center';
+            chevron.style.width = '16px';
+            chevron.style.height = '16px';
+            chevron.style.borderRadius = '2px';
+            chevron.style.position = 'relative';
+            chevron.style.zIndex = '10';
+            
+            // Add click handler for chevron
+            chevron.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                console.log('Chevron clicked for line:', this.lineNumber, 'collapsed:', this.isCollapsed);
+                
+                // Dispatch custom event to toggle collapse state
+                const toggleEvent = new CustomEvent('toggleListCollapse', {
+                    detail: { 
+                        lineNumber: this.lineNumber, 
+                        isCollapsed: this.isCollapsed,
+                        indent: this.indent
+                    },
+                    bubbles: true
+                });
+                chevron.dispatchEvent(toggleEvent);
+            });
+            
+            // Add hover effects
+            chevron.addEventListener('mouseenter', () => {
+                chevron.style.color = 'var(--text-normal)';
+                chevron.style.backgroundColor = 'var(--background-modifier-hover)';
+                chevron.style.transform = 'scale(1.1)';
+            });
+            
+            chevron.addEventListener('mouseleave', () => {
+                chevron.style.color = 'var(--text-muted)';
+                chevron.style.backgroundColor = 'transparent';
+                chevron.style.transform = 'scale(1)';
+            });
+            
+            container.appendChild(chevron);
+        }
+        
+        // Add bullet point
+        const bullet = document.createElement('span');
+        bullet.className = 'list-bullet-widget';
+        bullet.textContent = '· ';
+        bullet.style.color = 'var(--text-normal)';
+        bullet.style.fontWeight = 'bold';
+        bullet.style.fontSize = '1.2em';
+        
+        container.appendChild(bullet);
+        
+        return container;
     }
 }
 
@@ -315,6 +395,23 @@ class ImageWidget extends WidgetType {
 }
 
 
+class CollapseStateWidget extends WidgetType {
+    constructor(private state: 'collapsed' | 'hidden') {
+        super();
+    }
+
+    eq(other: CollapseStateWidget) {
+        return other.state === this.state;
+    }
+
+    toDOM() {
+        const span = document.createElement('span');
+        span.className = 'collapse-state-marker';
+        span.textContent = this.state === 'collapsed' ? '<!--COLLAPSED-->' : '<!--HIDDEN-->';
+        return span;
+    }
+}
+
 function createInternalLinkExtension(plugin: SurveyNotePlugin) {
     const internalLinkRegex = /\[\[([^\]]+)\]\]/g;
     const internalImageRegex = /!\[\[([^\]]+)\]\]/g;
@@ -323,6 +420,7 @@ function createInternalLinkExtension(plugin: SurveyNotePlugin) {
     const codeBlockRegex = /```(\w*)\n?([\s\S]*?)\n?```/g;
     const urlRegex = /(https?:\/\/[^\s]+)/g;
     const listItemRegex = /^(\s*)([-*])( +)/gm;
+    const collapseMarkerRegex = /<!--(COLLAPSED|HIDDEN)-->/g;
     
     function parseImageOptions(optionsStr: string): { 
         width?: number; 
@@ -358,17 +456,131 @@ function createInternalLinkExtension(plugin: SurveyNotePlugin) {
         return { width, height, align };
     }
     
+    // Parse list structure to determine which items have children and should be hidden
+    function parseListStructure(text: string): Map<number, { hasChildren: boolean, isCollapsed: boolean, shouldHide: boolean }> {
+        const lines = text.split('\n');
+        const listInfo = new Map<number, { hasChildren: boolean, isCollapsed: boolean, shouldHide: boolean }>();
+        
+        // First pass: identify all list items in the original text 
+        const allListItems: Array<{ lineIndex: number, indentLevel: number, isCollapsed: boolean, originalLine: string }> = [];
+        
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            // Remove collapse markers for structure analysis but preserve original line
+            const cleanLine = line.replace(/<!--(COLLAPSED|HIDDEN)-->/g, '');
+            const match = cleanLine.match(/^(\s*)([-*])( +)/);
+            
+            if (match) {
+                const indent = match[1];
+                const indentLevel = indent.length;
+                const isCollapsed = line.includes('<!--COLLAPSED-->');
+                
+                allListItems.push({ lineIndex: i, indentLevel, isCollapsed, originalLine: line });
+            }
+        }
+        
+        // Second pass: determine children and visibility for each item
+        for (let i = 0; i < allListItems.length; i++) {
+            const currentItem = allListItems[i];
+            let hasChildren = false;
+            let shouldHide = false;
+            
+            // Check if this item has children (always check the complete structure based on indentation)
+            for (let j = i + 1; j < allListItems.length; j++) {
+                const nextItem = allListItems[j];
+                if (nextItem.indentLevel > currentItem.indentLevel) {
+                    hasChildren = true;
+                    break;
+                } else if (nextItem.indentLevel <= currentItem.indentLevel) {
+                    // Found an item at same or lesser indentation level, so no more children
+                    break;
+                }
+            }
+            
+            // Check if this item should be hidden (any ancestor is collapsed)
+            for (let j = i - 1; j >= 0; j--) {
+                const potentialParent = allListItems[j];
+                if (potentialParent.indentLevel < currentItem.indentLevel) {
+                    // This is a parent - check if it's collapsed
+                    if (potentialParent.isCollapsed) {
+                        shouldHide = true;
+                        break; // Found the immediate collapsed parent
+                    }
+                    // If we find a parent at the same or less indentation that's not collapsed,
+                    // we can stop checking further up the hierarchy
+                    if (potentialParent.indentLevel <= currentItem.indentLevel - 2) {
+                        break;
+                    }
+                }
+            }
+            
+            listInfo.set(currentItem.lineIndex, { 
+                hasChildren, 
+                isCollapsed: currentItem.isCollapsed, 
+                shouldHide 
+            });
+            
+            console.log(`parseListStructure: Line ${currentItem.lineIndex}: indent=${currentItem.indentLevel}, hasChildren=${hasChildren}, isCollapsed=${currentItem.isCollapsed}, shouldHide=${shouldHide}, line="${currentItem.originalLine.trim()}"`);
+        }
+        
+        return listInfo;
+    }
+
     function scanForLinks(text: string, selection?: { from: number; to: number }): Range<Decoration>[] {
         console.log('Scanning for links in text:', text, 'Selection:', selection);
         const newDecorations: Range<Decoration>[] = [];
+        
+        // Parse list structure first
+        const listStructure = parseListStructure(text);
         
         // Store markdown link, image, code block, and list item positions for URL scanning
         const markdownLinkRanges: Array<{from: number, to: number}> = [];
         const imageRanges: Array<{from: number, to: number}> = [];
         const codeBlockRanges: Array<{from: number, to: number}> = [];
         const listItemRanges: Array<{from: number, to: number}> = [];
+        const hiddenLineRanges: Array<{from: number, to: number}> = [];
         
-        // Scan for code blocks first ```language\ncode```
+        // First, handle hidden lines due to collapsed parents
+        const lines = text.split('\n');
+        let lineStart = 0;
+        
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            const lineEnd = lineStart + line.length;
+            
+            // Check if this line should be hidden
+            const lineInfo = listStructure.get(i);
+            if (lineInfo && lineInfo.shouldHide) {
+                console.log('scanForLinks: Processing hidden line:', i, `"${line}"`);
+                
+                // Hide the entire line including newline
+                const hideStart = lineStart;
+                const hideEnd = i < lines.length - 1 ? lineEnd + 1 : lineEnd; // Include newline if not last line
+                
+                hiddenLineRanges.push({from: hideStart, to: hideEnd});
+                
+                const decoration = Decoration.replace({
+                    widget: new class extends WidgetType {
+                        toDOM() {
+                            const span = document.createElement('span');
+                            span.style.display = 'none';
+                            span.style.visibility = 'hidden';
+                            span.style.height = '0';
+                            span.style.width = '0';
+                            span.style.margin = '0';
+                            span.style.padding = '0';
+                            span.style.overflow = 'hidden';
+                            return span;
+                        }
+                    }()
+                });
+                newDecorations.push(decoration.range(hideStart, hideEnd));
+            }
+            
+            lineStart = lineEnd + 1; // +1 for newline character
+        }
+        
+        // Scan for code blocks ```language\ncode```
         let match;
         codeBlockRegex.lastIndex = 0;
         while ((match = codeBlockRegex.exec(text)) !== null) {
@@ -410,7 +622,31 @@ function createInternalLinkExtension(plugin: SurveyNotePlugin) {
             }
         }
         
+        // Scan for collapse state markers
+        collapseMarkerRegex.lastIndex = 0;
+        while ((match = collapseMarkerRegex.exec(text)) !== null) {
+            const from = match.index;
+            const to = match.index + match[0].length;
+            const markerType = match[1].toLowerCase();
+            
+            console.log('scanForLinks: Found collapse marker:', { 
+                match: `"${match[0]}"`, 
+                type: markerType, 
+                from, 
+                to 
+            });
+            
+            // Replace marker with hidden widget
+            const decoration = Decoration.replace({
+                widget: new CollapseStateWidget(markerType as 'collapsed' | 'hidden')
+            });
+            newDecorations.push(decoration.range(from, to));
+        }
+        
+        
         // Scan for list items (- or * at the beginning of line with spaces)
+        let currentPos = 0;
+        
         listItemRegex.lastIndex = 0;
         while ((match = listItemRegex.exec(text)) !== null) {
             const from = match.index;
@@ -421,6 +657,33 @@ function createInternalLinkExtension(plugin: SurveyNotePlugin) {
             
             listItemRanges.push({from, to});
             
+            // Find which line this match corresponds to
+            let lineNumber = 0;
+            lineStart = 0;
+            for (let i = 0; i < lines.length; i++) {
+                const lineEnd = lineStart + lines[i].length;
+                if (from >= lineStart && from <= lineEnd) {
+                    lineNumber = i;
+                    break;
+                }
+                lineStart = lineEnd + 1; // +1 for newline character
+            }
+            
+            // Get list structure info for this line
+            const listInfo = listStructure.get(lineNumber) || { hasChildren: false, isCollapsed: false, shouldHide: false };
+            
+            // Skip creating list widgets for items that should be hidden or overlap with hidden ranges
+            const overlapsWithHidden = hiddenLineRanges.some(range => 
+                (from >= range.from && from < range.to) || 
+                (to > range.from && to <= range.to) ||
+                (from <= range.from && to >= range.to)
+            );
+            
+            if (listInfo.shouldHide || overlapsWithHidden) {
+                console.log('scanForLinks: Skipping list widget creation for hidden line:', lineNumber, `"${lines[lineNumber]}"`, 'shouldHide:', listInfo.shouldHide, 'overlapsWithHidden:', overlapsWithHidden);
+                continue;
+            }
+            
             console.log('scanForLinks: Found list item:', { 
                 match: `"${match[0]}"`, 
                 indent: `"${indent}"`, 
@@ -428,12 +691,15 @@ function createInternalLinkExtension(plugin: SurveyNotePlugin) {
                 spaces: `"${spaces}"`, 
                 from, 
                 to,
-                fullMatch: match[0].length
+                lineNumber,
+                hasChildren: listInfo.hasChildren,
+                isCollapsed: listInfo.isCollapsed,
+                shouldHide: listInfo.shouldHide
             });
             
             // Replace the entire match (indent + bullet + spaces) with our custom widget
             const decoration = Decoration.replace({
-                widget: new ListBulletWidget(indent)
+                widget: new ListBulletWidget(indent, listInfo.hasChildren, listInfo.isCollapsed, lineNumber)
             });
             newDecorations.push(decoration.range(from, to));
         }
@@ -674,14 +940,31 @@ function createInternalLinkExtension(plugin: SurveyNotePlugin) {
             return Decoration.set(decorations);
         },
         update(decorations, tr) {
-            decorations = decorations.map(tr.changes);
-            
-            if (tr.docChanged || tr.selection) {
+            // If document changed, completely rebuild decorations instead of mapping
+            if (tr.docChanged) {
                 const text = tr.state.doc.toString();
                 const selection = tr.state.selection.main;
-                console.log('Document or selection changed, rescanning for links');
+                console.log('Document changed, rebuilding all decorations');
                 const newDecorations = scanForLinks(text, selection);
-                decorations = Decoration.set(newDecorations);
+                return Decoration.set(newDecorations);
+            }
+            
+            // For selection changes only, try to map existing decorations safely
+            if (tr.selection) {
+                try {
+                    decorations = decorations.map(tr.changes);
+                    const text = tr.state.doc.toString();
+                    const selection = tr.state.selection.main;
+                    console.log('Selection changed, rescanning for links');
+                    const newDecorations = scanForLinks(text, selection);
+                    return Decoration.set(newDecorations);
+                } catch (error) {
+                    console.log('Error mapping decorations, rebuilding:', error);
+                    const text = tr.state.doc.toString();
+                    const selection = tr.state.selection.main;
+                    const newDecorations = scanForLinks(text, selection);
+                    return Decoration.set(newDecorations);
+                }
             }
             
             return decorations;
@@ -743,16 +1026,26 @@ function createListInputHandler() {
                         with: `"${bullet} "`
                     });
                     
+                    // Create a combined transaction that includes both the bullet conversion 
+                    // and the space insertion, so it appears as one undoable action
                     view.dispatch({
-                        changes: {
-                            from: bulletStart,
-                            to: bulletEnd,
-                            insert: bullet + ' '
-                        },
-                        selection: { anchor: bulletStart + 2 } // Position after the bullet and space
+                        changes: [
+                            {
+                                from: bulletStart,
+                                to: bulletEnd,
+                                insert: bullet
+                            },
+                            {
+                                from: bulletEnd,
+                                to: bulletEnd,
+                                insert: ' '
+                            }
+                        ],
+                        selection: { anchor: bulletStart + 2 }, // Position after the bullet and space
+                        userEvent: "input.type"
                     });
                     
-                    console.log('handleInput: Change dispatched, preventing space insertion');
+                    console.log('handleInput: Combined change dispatched as single undoable action');
                     return true; // Prevent the space from being inserted again
                 } else {
                     console.log('handleInput: No match for list pattern');
@@ -815,7 +1108,8 @@ function createListInputHandler() {
                             to: line.from + indent.length,
                             insert: indent + '- '
                         },
-                        selection: { anchor: line.from + indent.length + 2 }
+                        selection: { anchor: line.from + indent.length + 2 },
+                        userEvent: "delete.backward"
                     });
                     
                     return true; // Prevent default backspace
@@ -869,7 +1163,8 @@ function createListInputHandler() {
                         to: to,
                         insert: '\n' + indent
                     },
-                    selection: { anchor: from + 1 + indent.length }
+                    selection: { anchor: from + 1 + indent.length },
+                    userEvent: "input.type"
                 });
                 
                 return true; // Prevent default enter behavior
@@ -925,7 +1220,8 @@ function createListInputHandler() {
                         to: lineStart + currentIndent.length,
                         insert: currentIndent + newIndent
                     },
-                    selection: { anchor: lineStart + currentIndent.length + newIndent.length }
+                    selection: { anchor: lineStart + currentIndent.length + newIndent.length },
+                    userEvent: "input.indent"
                 });
                 
                 return true; // Prevent default tab behavior
@@ -1216,7 +1512,8 @@ export class SurveyNoteView extends ItemView {
         const state = EditorState.create({
             doc: this.editorData[title] || "",
             extensions: [
-                keymap.of([...defaultKeymap, indentWithTab]),
+                history(),
+                keymap.of([...defaultKeymap, ...historyKeymap, indentWithTab]),
                 markdown({ base: markdownLanguage }),
                 ...createInternalLinkExtension(this.plugin),
                 ...createListInputHandler(),
@@ -1265,6 +1562,17 @@ export class SurveyNoteView extends ItemView {
                     blockIndex++;
                 }
             }
+        });
+
+        // Add handler for list collapse toggle
+        contentContainer.addEventListener('toggleListCollapse', (event: Event) => {
+            const customEvent = event as CustomEvent;
+            const { lineNumber, isCollapsed, indent } = customEvent.detail;
+            
+            console.log('Toggle list collapse event:', { lineNumber, isCollapsed, indent });
+            
+            // Toggle the collapse state by manipulating the document
+            this.toggleListCollapse(editor, lineNumber, isCollapsed, indent);
         });
 
         // Add click handler for links
@@ -1392,6 +1700,72 @@ export class SurveyNoteView extends ItemView {
     private openUrl(url: string) {
         console.log('Opening URL in browser:', url);
         window.open(url, '_blank');
+    }
+
+    private toggleListCollapse(editor: EditorView, lineNumber: number, isCollapsed: boolean, indent: string) {
+        const doc = editor.state.doc;
+        const lines = doc.toString().split('\n');
+        
+        if (lineNumber >= lines.length) {
+            console.log('toggleListCollapse: Invalid line number', lineNumber, 'total lines:', lines.length);
+            return;
+        }
+        
+        const newCollapsedState = !isCollapsed;
+        
+        console.log('toggleListCollapse: Toggling collapse for line', lineNumber, 'from', isCollapsed, 'to', newCollapsedState);
+        console.log('toggleListCollapse: Current line:', `"${lines[lineNumber]}"`);
+        
+        // Find the start and end position of the target line
+        let lineStart = 0;
+        for (let i = 0; i < lineNumber; i++) {
+            lineStart += lines[i].length + 1; // +1 for newline
+        }
+        const lineEnd = lineStart + lines[lineNumber].length;
+        
+        console.log('toggleListCollapse: Line position - start:', lineStart, 'end:', lineEnd, 'doc length:', doc.length);
+        
+        // Create the new line content
+        let newLineContent: string;
+        if (newCollapsedState) {
+            // Add collapsed marker if not already present
+            if (!lines[lineNumber].includes('<!--COLLAPSED-->')) {
+                newLineContent = lines[lineNumber] + '<!--COLLAPSED-->';
+                console.log('toggleListCollapse: Adding COLLAPSED marker');
+            } else {
+                console.log('toggleListCollapse: COLLAPSED marker already present');
+                return; // No change needed
+            }
+        } else {
+            // Remove collapsed marker
+            newLineContent = lines[lineNumber].replace(/<!--COLLAPSED-->/g, '');
+            console.log('toggleListCollapse: Removing COLLAPSED marker');
+        }
+        
+        console.log('toggleListCollapse: Line content changing from:', `"${lines[lineNumber]}"`, 'to:', `"${newLineContent}"`);
+        
+        // Update only the specific line instead of the entire document
+        const changes = {
+            from: lineStart,
+            to: lineEnd,
+            insert: newLineContent
+        };
+        
+        console.log('toggleListCollapse: Applying change:', changes);
+        
+        // Calculate safe cursor position
+        const newDocLength = doc.length - lines[lineNumber].length + newLineContent.length;
+        const safeCursorPos = Math.min(lineStart + newLineContent.length, newDocLength);
+        
+        console.log('toggleListCollapse: New doc length will be:', newDocLength, 'safe cursor pos:', safeCursorPos);
+        
+        // Update the document with the line-specific change
+        editor.dispatch({
+            changes: changes,
+            selection: { anchor: safeCursorPos }
+        });
+        
+        console.log('toggleListCollapse: Document updated successfully');
     }
 
     private async handleImageDrop(file: File, view: EditorView, title: string) {
