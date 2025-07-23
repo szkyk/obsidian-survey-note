@@ -179,23 +179,43 @@ class ListBulletWidget extends WidgetType {
 }
 
 class CodeBlockWidget extends WidgetType {
-    constructor(private code: string, private language: string = '') {
+    constructor(private code: string, private language: string = '', private isCollapsed: boolean = false) {
         super();
     }
 
     eq(other: CodeBlockWidget) {
-        return other.code === this.code && other.language === this.language;
+        return other.code === this.code && other.language === this.language && other.isCollapsed === this.isCollapsed;
     }
 
     toDOM() {
-        console.log('Creating DOM element for code block:', this.language, this.code.length, 'chars');
+        console.log('Creating DOM element for code block:', this.language, this.code.length, 'chars', 'collapsed:', this.isCollapsed);
         const container = document.createElement('div');
         container.className = 'code-block-widget-container';
+        
+        const buttonContainer = document.createElement('div');
+        buttonContainer.className = 'code-block-buttons';
+        
+        // Add collapse button
+        const collapseButton = document.createElement('button');
+        collapseButton.className = 'code-block-collapse-button';
+        collapseButton.innerHTML = this.isCollapsed ? '⊞' : '⊟';
+        collapseButton.title = this.isCollapsed ? 'Expand code block' : 'Collapse code block';
+        collapseButton.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            console.log('Collapse button clicked');
+            
+            const toggleEvent = new CustomEvent('toggleCodeBlockCollapse', {
+                detail: { target: container, isCollapsed: this.isCollapsed },
+                bubbles: true
+            });
+            container.dispatchEvent(toggleEvent);
+        });
         
         // Add copy button
         const copyButton = document.createElement('button');
         copyButton.className = 'code-block-copy-button';
-        copyButton.innerHTML = '📋'; // Copy icon
+        copyButton.innerHTML = '📋';
         copyButton.title = 'Copy code';
         copyButton.addEventListener('click', (e) => {
             e.preventDefault();
@@ -203,7 +223,6 @@ class CodeBlockWidget extends WidgetType {
             console.log('Copy button clicked');
             navigator.clipboard.writeText(this.code).then(() => {
                 console.log('Code copied to clipboard');
-                // Show brief feedback
                 copyButton.innerHTML = '✓';
                 setTimeout(() => {
                     copyButton.innerHTML = '📋';
@@ -213,8 +232,12 @@ class CodeBlockWidget extends WidgetType {
             });
         });
         
+        buttonContainer.appendChild(collapseButton);
+        buttonContainer.appendChild(copyButton);
+        
         const pre = document.createElement('pre');
         pre.className = 'code-block-widget';
+        pre.style.position = 'relative';
         
         const code = document.createElement('code');
         if (this.language) {
@@ -222,13 +245,22 @@ class CodeBlockWidget extends WidgetType {
         }
         code.textContent = this.code;
         
+        // Show/hide content based on collapsed state
+        if (this.isCollapsed) {
+            const collapsedPreview = document.createElement('div');
+            collapsedPreview.className = 'code-block-collapsed';
+            collapsedPreview.textContent = `${this.language ? `[${this.language}] ` : ''}Code block (${this.code.split('\n').length} lines)`;
+            pre.appendChild(collapsedPreview);
+        } else {
+            pre.appendChild(code);
+        }
+        
         // Make the code block clickable to focus and allow cursor positioning
         container.addEventListener('click', (e) => {
             console.log('Code block clicked, focusing for editing');
             e.preventDefault();
             e.stopPropagation();
             
-            // Dispatch a custom event to signal that we want to edit this code block
             const customEvent = new CustomEvent('editCodeBlock', {
                 detail: { target: container },
                 bubbles: true
@@ -239,8 +271,7 @@ class CodeBlockWidget extends WidgetType {
         container.style.cursor = 'text';
         container.title = 'Click to edit code block';
         
-        pre.appendChild(code);
-        container.appendChild(copyButton);
+        pre.appendChild(buttonContainer);
         container.appendChild(pre);
         
         return container;
@@ -412,6 +443,26 @@ class CollapseStateWidget extends WidgetType {
     }
 }
 
+// State for managing code block collapse states
+const codeBlockCollapseState = StateField.define<Map<number, boolean>>({
+    create() {
+        return new Map();
+    },
+    update(value, tr) {
+        // Check for collapse toggle effects
+        for (const effect of tr.effects) {
+            if (effect.is(toggleCodeBlockEffect)) {
+                const newValue = new Map(value);
+                newValue.set(effect.value.blockIndex, effect.value.isCollapsed);
+                return newValue;
+            }
+        }
+        return value;
+    }
+});
+
+const toggleCodeBlockEffect = StateEffect.define<{blockIndex: number, isCollapsed: boolean}>();
+
 function createInternalLinkExtension(plugin: SurveyNotePlugin) {
     const internalLinkRegex = /\[\[([^\]]+)\]\]/g;
     const internalImageRegex = /!\[\[([^\]]+)\]\]/g;
@@ -526,7 +577,7 @@ function createInternalLinkExtension(plugin: SurveyNotePlugin) {
         return listInfo;
     }
 
-    function scanForLinks(text: string, selection?: { from: number; to: number }): Range<Decoration>[] {
+    function scanForLinks(text: string, selection?: { from: number; to: number }, collapseStates?: Map<number, boolean>): Range<Decoration>[] {
         console.log('Scanning for links in text:', text, 'Selection:', selection);
         const newDecorations: Range<Decoration>[] = [];
         
@@ -582,16 +633,18 @@ function createInternalLinkExtension(plugin: SurveyNotePlugin) {
         
         // Scan for code blocks ```language\ncode```
         let match;
+        let codeBlockIndex = 0;
         codeBlockRegex.lastIndex = 0;
         while ((match = codeBlockRegex.exec(text)) !== null) {
             const from = match.index;
             const to = match.index + match[0].length;
             const language = match[1] || '';
             const code = match[2] || '';
+            const isCollapsed = collapseStates ? (collapseStates.get(codeBlockIndex) || false) : false;
             
             codeBlockRanges.push({from, to});
             
-            console.log('Found code block:', { match: match[0], language, codeLength: code.length, from, to });
+            console.log('Found code block:', { match: match[0], language, codeLength: code.length, from, to, isCollapsed, blockIndex: codeBlockIndex });
             
             // Check if cursor/selection is within this code block range
             const cursorInRange = selection && (
@@ -607,6 +660,7 @@ function createInternalLinkExtension(plugin: SurveyNotePlugin) {
                     class: 'code-block-editing',
                     attributes: {
                         'data-language': language,
+                        'data-block-index': codeBlockIndex.toString(),
                         'title': `Code block${language ? ` (${language})` : ''}`,
                         'style': 'cursor: text; background-color: var(--background-modifier-hover);'
                     }
@@ -616,10 +670,11 @@ function createInternalLinkExtension(plugin: SurveyNotePlugin) {
                 console.log('Cursor outside code block range, showing code widget');
                 // Show code block widget when cursor is outside range
                 const decoration = Decoration.replace({
-                    widget: new CodeBlockWidget(code, language)
+                    widget: new CodeBlockWidget(code, language, isCollapsed)
                 });
                 newDecorations.push(decoration.range(from, to));
             }
+            codeBlockIndex++;
         }
         
         // Scan for collapse state markers
@@ -936,16 +991,18 @@ function createInternalLinkExtension(plugin: SurveyNotePlugin) {
             console.log('Creating link field with initial state');
             const text = state.doc.toString();
             const selection = state.selection.main;
-            const decorations = scanForLinks(text, selection);
+            const collapseStates = state.field(codeBlockCollapseState);
+            const decorations = scanForLinks(text, selection, collapseStates);
             return Decoration.set(decorations);
         },
         update(decorations, tr) {
-            // If document changed, completely rebuild decorations instead of mapping
-            if (tr.docChanged) {
+            // If document changed or collapse state changed, rebuild decorations
+            if (tr.docChanged || tr.effects.some(e => e.is(toggleCodeBlockEffect))) {
                 const text = tr.state.doc.toString();
                 const selection = tr.state.selection.main;
-                console.log('Document changed, rebuilding all decorations');
-                const newDecorations = scanForLinks(text, selection);
+                const collapseStates = tr.state.field(codeBlockCollapseState);
+                console.log('Document or collapse state changed, rebuilding all decorations');
+                const newDecorations = scanForLinks(text, selection, collapseStates);
                 return Decoration.set(newDecorations);
             }
             
@@ -955,14 +1012,16 @@ function createInternalLinkExtension(plugin: SurveyNotePlugin) {
                     decorations = decorations.map(tr.changes);
                     const text = tr.state.doc.toString();
                     const selection = tr.state.selection.main;
+                    const collapseStates = tr.state.field(codeBlockCollapseState);
                     console.log('Selection changed, rescanning for links');
-                    const newDecorations = scanForLinks(text, selection);
+                    const newDecorations = scanForLinks(text, selection, collapseStates);
                     return Decoration.set(newDecorations);
                 } catch (error) {
                     console.log('Error mapping decorations, rebuilding:', error);
                     const text = tr.state.doc.toString();
                     const selection = tr.state.selection.main;
-                    const newDecorations = scanForLinks(text, selection);
+                    const collapseStates = tr.state.field(codeBlockCollapseState);
+                    const newDecorations = scanForLinks(text, selection, collapseStates);
                     return Decoration.set(newDecorations);
                 }
             }
@@ -972,7 +1031,7 @@ function createInternalLinkExtension(plugin: SurveyNotePlugin) {
         provide: f => EditorView.decorations.from(f)
     });
     
-    return [linkField];
+    return [codeBlockCollapseState, linkField];
 }
 
 function createListInputHandler() {
@@ -1571,6 +1630,32 @@ export class SurveyNoteView extends ItemView {
             
             // Toggle the collapse state by manipulating the document
             this.toggleListCollapse(editor, lineNumber, isCollapsed, indent);
+        });
+
+        // Add handler for code block collapse toggle
+        contentContainer.addEventListener('toggleCodeBlockCollapse', (event: Event) => {
+            const customEvent = event as CustomEvent;
+            const { target, isCollapsed } = customEvent.detail;
+            
+            console.log('Toggle code block collapse event:', { isCollapsed });
+            
+            // Find the block index by counting code blocks before this one
+            const text = editor.state.doc.toString();
+            const codeBlockRegex = /```(\w*)\n?([\s\S]*?)\n?```/g;
+            const allCodeBlocks = contentContainer.querySelectorAll('.code-block-widget-container');
+            const clickedIndex = Array.from(allCodeBlocks).indexOf(target);
+            
+            if (clickedIndex !== -1) {
+                console.log('Toggling code block', clickedIndex, 'to collapsed:', !isCollapsed);
+                
+                // Dispatch the state effect to toggle collapse
+                editor.dispatch({
+                    effects: toggleCodeBlockEffect.of({
+                        blockIndex: clickedIndex,
+                        isCollapsed: !isCollapsed
+                    })
+                });
+            }
         });
 
         // Add click handler for links

@@ -390,19 +390,43 @@
   background-color: var(--background-modifier-border) !important;
 }
 
+/* Code block button container */
+.code-block-buttons {
+  position: absolute !important;
+  top: 8px !important;
+  right: 8px !important;
+  display: flex !important;
+  gap: 4px !important;
+  z-index: 10 !important;
+}
+
+/* Collapse button styling */
+.code-block-collapse-button {
+  background: var(--background-secondary) !important;
+  border: 1px solid var(--background-modifier-border) !important;
+  border-radius: 3px !important;
+  padding: 2px 6px !important;
+  cursor: pointer !important;
+  font-size: 12px !important;
+  color: var(--text-muted) !important;
+  transition: all 0.2s ease !important;
+}
+
+.code-block-collapse-button:hover {
+  background-color: var(--background-modifier-hover) !important;
+  color: var(--text-normal) !important;
+  border-color: var(--interactive-accent) !important;
+}
+
 /* Copy button styling */
 .code-block-copy-button {
-  position: absolute !important;
-  top: 0.5em !important;
-  right: 0.5em !important;
-  background-color: var(--background-secondary) !important;
+  background: var(--background-secondary) !important;
   border: 1px solid var(--background-modifier-border) !important;
-  border-radius: 4px !important;
-  padding: 0.25em 0.5em !important;
-  font-size: 0.8em !important;
+  border-radius: 3px !important;
+  padding: 2px 6px !important;
   cursor: pointer !important;
+  font-size: 12px !important;
   color: var(--text-muted) !important;
-  z-index: 10 !important;
   transition: all 0.2s ease !important;
 }
 
@@ -410,6 +434,15 @@
   background-color: var(--background-modifier-hover) !important;
   color: var(--text-normal) !important;
   border-color: var(--interactive-accent) !important;
+}
+
+/* Collapsed state styling */
+.code-block-collapsed {
+  padding: 8px 12px !important;
+  color: var(--text-muted) !important;
+  font-style: italic !important;
+  background: var(--background-modifier-hover) !important;
+  border-radius: 4px !important;
 }
 
 /* List bullet widget styling */
