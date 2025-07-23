@@ -1362,10 +1362,8 @@ export class SurveyNoteView extends ItemView {
     }
 
     async setMarkdownView() {
-        await this.leaf.setViewState({
-            type: 'markdown',
-            state: this.getState(),
-        });
+        // Use the plugin's setMarkdownView method to properly handle manual view switch
+        await this.plugin.setMarkdownView(this.leaf);
     }
 
     async parseMarkdown() {

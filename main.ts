@@ -26,6 +26,7 @@ const DEFAULT_SETTINGS: SurveyNotePluginSettings = {
 export default class SurveyNotePlugin extends Plugin {
 	settings: SurveyNotePluginSettings;
 	private viewedFiles: Set<string> = new Set();
+	private manualViewSwitch: boolean = false;
 
 	/**
 	 * Plugin initialization
@@ -135,24 +136,34 @@ export default class SurveyNotePlugin extends Plugin {
 	 * Switch the given leaf to SurveyNote view
 	 */
 	async setSurveyNoteView(leaf: WorkspaceLeaf) {
+		this.manualViewSwitch = true;
 		const state = leaf.view.getState();
 		await leaf.setViewState({
 			type: VIEW_TYPE_SURVEYNOTE,
 			state: state,
 			active: true,
 		});
+		// Reset flag after a short delay to allow file-open event to complete
+		setTimeout(() => {
+			this.manualViewSwitch = false;
+		}, 200);
 	}
 
 	/**
 	 * Switch the given leaf to Markdown view
 	 */
 	async setMarkdownView(leaf: WorkspaceLeaf) {
+		this.manualViewSwitch = true;
 		const state = leaf.view.getState();
 		await leaf.setViewState({
 			type: 'markdown',
 			state: state,
 			active: true,
 		});
+		// Reset flag after a short delay to allow file-open event to complete
+		setTimeout(() => {
+			this.manualViewSwitch = false;
+		}, 200);
 	}
 
 	/**
@@ -232,10 +243,16 @@ export default class SurveyNotePlugin extends Plugin {
 
 	/**
 	 * Check if file has survey-note-view: note property and auto-switch to SurveyNote view
-	 * Only switches on the first time viewing the file
+	 * Only switches on the first time viewing the file and not during manual view switches
 	 */
 	checkAndAutoSwitchToSurveyNote(file: any) {
 		const filePath = file.path;
+		
+		// Skip auto-switch if this is a manual view switch
+		if (this.manualViewSwitch) {
+			console.log('Skipping auto-switch during manual view switch for:', filePath);
+			return;
+		}
 		
 		// Check if this file has already been viewed in this session
 		if (this.viewedFiles.has(filePath)) {
@@ -255,6 +272,7 @@ export default class SurveyNotePlugin extends Plugin {
 				const leaf = this.app.workspace.activeLeaf;
 				// Only switch if current view is MarkdownView (not already SurveyNoteView)
 				if (leaf?.view instanceof MarkdownView && leaf.view.file === file) {
+					console.log('Auto-switching to SurveyNote view for:', filePath);
 					this.setSurveyNoteView(leaf);
 				}
 			}
