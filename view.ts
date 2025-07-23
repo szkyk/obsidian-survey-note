@@ -1343,6 +1343,9 @@ export class SurveyNoteView extends ItemView {
         this.addAction("file-text", "Markdown表示に切り替え", () => {
             this.setMarkdownView();
         });
+        this.addAction("plus", "新規SurveyNote作成", () => {
+            this.createNewSurveyNote();
+        });
         this.applyStyles();
     }
 
@@ -1934,6 +1937,70 @@ export class SurveyNoteView extends ItemView {
         } catch (error) {
             console.error('Error handling image drop:', error);
             new Notice('画像の保存に失敗しました: ' + error.message);
+        }
+    }
+
+    private async createNewSurveyNote() {
+        try {
+            // Get current file's directory
+            const currentDirectory = this.file?.parent;
+            if (!currentDirectory) {
+                new Notice("現在のノートのディレクトリが見つかりません。");
+                return;
+            }
+
+            // Generate unique filename based on existing files in directory
+            let counter = 1;
+            let filename: string;
+            let filePath: string;
+
+            // First try "無題のファイル.md"
+            filename = "無題のファイル.md";
+            filePath = `${currentDirectory.path}/${filename}`;
+
+            // If it exists, try "無題のファイル2.md", "無題のファイル3.md", etc.
+            while (await this.app.vault.adapter.exists(filePath)) {
+                counter++;
+                filename = `無題のファイル${counter}.md`;
+                filePath = `${currentDirectory.path}/${filename}`;
+            }
+
+            // Create content with frontmatter
+            const content = `---
+survey-note-view: note
+---
+
+## Purpose
+
+
+## Summary
+
+
+## Content1
+
+
+## Supplement
+
+
+## Content2
+
+`;
+
+            // Create the new file
+            const newFile = await this.app.vault.create(filePath, content);
+            
+            // Open the new file in SurveyNote view
+            const leaf = this.app.workspace.getUnpinnedLeaf();
+            await leaf.openFile(newFile);
+            
+            // Switch to SurveyNote view
+            await this.plugin.setSurveyNoteView(leaf);
+            
+            new Notice(`新しいSurveyNoteを作成しました: ${filename}`);
+            
+        } catch (error) {
+            console.error('Error creating new SurveyNote:', error);
+            new Notice('新しいSurveyNoteの作成に失敗しました: ' + error.message);
         }
     }
 }
