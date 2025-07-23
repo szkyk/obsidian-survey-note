@@ -1716,56 +1716,107 @@ export class SurveyNoteView extends ItemView {
         console.log('toggleListCollapse: Toggling collapse for line', lineNumber, 'from', isCollapsed, 'to', newCollapsedState);
         console.log('toggleListCollapse: Current line:', `"${lines[lineNumber]}"`);
         
-        // Find the start and end position of the target line
+        // Parse the current indent level of the parent item
+        const parentLine = lines[lineNumber];
+        const parentIndentMatch = parentLine.match(/^(\s*)/);
+        const parentIndentLevel = parentIndentMatch ? parentIndentMatch[1].length : 0;
+        
+        console.log('toggleListCollapse: Parent indent level:', parentIndentLevel);
+        
+        // Find all child items that need to be toggled
+        const changes = [];
         let lineStart = 0;
-        for (let i = 0; i < lineNumber; i++) {
-            lineStart += lines[i].length + 1; // +1 for newline
-        }
-        const lineEnd = lineStart + lines[lineNumber].length;
         
-        console.log('toggleListCollapse: Line position - start:', lineStart, 'end:', lineEnd, 'doc length:', doc.length);
-        
-        // Create the new line content
-        let newLineContent: string;
-        if (newCollapsedState) {
-            // Add collapsed marker if not already present
-            if (!lines[lineNumber].includes('<!--COLLAPSED-->')) {
-                newLineContent = lines[lineNumber] + '<!--COLLAPSED-->';
-                console.log('toggleListCollapse: Adding COLLAPSED marker');
-            } else {
-                console.log('toggleListCollapse: COLLAPSED marker already present');
-                return; // No change needed
+        // Calculate line positions and collect changes
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            const lineEnd = lineStart + line.length;
+            
+            if (i === lineNumber) {
+                // Update parent line with collapsed marker
+                let newLineContent: string;
+                if (newCollapsedState) {
+                    // Add collapsed marker if not already present
+                    if (!line.includes('<!--COLLAPSED-->')) {
+                        newLineContent = line + '<!--COLLAPSED-->';
+                        console.log('toggleListCollapse: Adding COLLAPSED marker to parent');
+                    } else {
+                        console.log('toggleListCollapse: COLLAPSED marker already present on parent');
+                        newLineContent = line;
+                    }
+                } else {
+                    // Remove collapsed marker from parent
+                    newLineContent = line.replace(/<!--COLLAPSED-->/g, '');
+                    console.log('toggleListCollapse: Removing COLLAPSED marker from parent');
+                }
+                
+                changes.push({
+                    from: lineStart,
+                    to: lineEnd,
+                    insert: newLineContent
+                });
+            } else if (i > lineNumber) {
+                // Check if this is a child item of the collapsed parent
+                const lineIndentMatch = line.match(/^(\s*)([-*]\s+|.*)/);
+                if (lineIndentMatch) {
+                    const lineIndentLevel = lineIndentMatch[1].length;
+                    const restOfLine = lineIndentMatch[2];
+                    
+                    // If indentation is greater than parent, it's a child
+                    if (lineIndentLevel > parentIndentLevel && restOfLine.trim().length > 0) {
+                        // Check if we've reached the next sibling or parent (same or lesser indentation)
+                        let isChild = true;
+                        
+                        // Look ahead to see if there's a list item at same or lesser indentation
+                        const nextListItemMatch = restOfLine.match(/^([-*]\s+)/);
+                        if (nextListItemMatch && lineIndentLevel <= parentIndentLevel) {
+                            isChild = false;
+                        }
+                        
+                        if (isChild) {
+                            let newChildContent: string;
+                            if (newCollapsedState) {
+                                // Add HIDDEN marker if not already present
+                                if (!line.includes('<!--HIDDEN-->')) {
+                                    newChildContent = line + '<!--HIDDEN-->';
+                                    console.log('toggleListCollapse: Adding HIDDEN marker to child line', i);
+                                } else {
+                                    newChildContent = line;
+                                }
+                            } else {
+                                // Remove HIDDEN marker
+                                newChildContent = line.replace(/<!--HIDDEN-->/g, '');
+                                console.log('toggleListCollapse: Removing HIDDEN marker from child line', i);
+                            }
+                            
+                            changes.push({
+                                from: lineStart,
+                                to: lineEnd,
+                                insert: newChildContent
+                            });
+                        }
+                    } else if (lineIndentLevel <= parentIndentLevel && restOfLine.match(/^[-*]\s+/)) {
+                        // Found next sibling or parent item, stop processing children
+                        console.log('toggleListCollapse: Found next sibling/parent at line', i, 'stopping child processing');
+                        break;
+                    }
+                }
             }
-        } else {
-            // Remove collapsed marker
-            newLineContent = lines[lineNumber].replace(/<!--COLLAPSED-->/g, '');
-            console.log('toggleListCollapse: Removing COLLAPSED marker');
+            
+            lineStart = lineEnd + 1; // +1 for newline character
         }
         
-        console.log('toggleListCollapse: Line content changing from:', `"${lines[lineNumber]}"`, 'to:', `"${newLineContent}"`);
+        console.log('toggleListCollapse: Applying', changes.length, 'changes');
         
-        // Update only the specific line instead of the entire document
-        const changes = {
-            from: lineStart,
-            to: lineEnd,
-            insert: newLineContent
-        };
-        
-        console.log('toggleListCollapse: Applying change:', changes);
-        
-        // Calculate safe cursor position
-        const newDocLength = doc.length - lines[lineNumber].length + newLineContent.length;
-        const safeCursorPos = Math.min(lineStart + newLineContent.length, newDocLength);
-        
-        console.log('toggleListCollapse: New doc length will be:', newDocLength, 'safe cursor pos:', safeCursorPos);
-        
-        // Update the document with the line-specific change
-        editor.dispatch({
-            changes: changes,
-            selection: { anchor: safeCursorPos }
-        });
-        
-        console.log('toggleListCollapse: Document updated successfully');
+        // Apply all changes in a single transaction
+        if (changes.length > 0) {
+            editor.dispatch({
+                changes: changes,
+                userEvent: "select.pointer"
+            });
+            
+            console.log('toggleListCollapse: Document updated successfully with', changes.length, 'changes');
+        }
     }
 
     private async handleImageDrop(file: File, view: EditorView, title: string) {
