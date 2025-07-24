@@ -479,17 +479,136 @@ class ImageWidget extends WidgetType {
             container.appendChild(fallback);
         });
         
+        // Add resize handle
+        const resizeHandle = document.createElement('div');
+        resizeHandle.className = 'image-resize-handle';
+        resizeHandle.title = 'Drag to resize image';
+        
+        // Function to update handle position
+        const updateHandlePosition = () => {
+            const imgRect = img.getBoundingClientRect();
+            const containerRect = container.getBoundingClientRect();
+            
+            // Position handle at bottom-right corner of the image with slight offset
+            const rightPos = imgRect.right - containerRect.left - 3;
+            const bottomPos = imgRect.bottom - containerRect.top - 3;
+            
+            resizeHandle.style.left = `${rightPos}px`;
+            resizeHandle.style.top = `${bottomPos}px`;
+        };
+        
+        // Update position when image loads
+        img.addEventListener('load', updateHandlePosition);
+        
+        // Also update position on image resize
+        const resizeObserver = new ResizeObserver(updateHandlePosition);
+        resizeObserver.observe(img);
+        
+        // Initial position update (for images with predefined sizes)
+        setTimeout(updateHandlePosition, 10);
+        
+        // Add resize functionality
+        let isResizing = false;
+        let startX = 0;
+        let startY = 0;
+        let startWidth = 0;
+        let startHeight = 0;
+        
+        resizeHandle.addEventListener('mousedown', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            
+            isResizing = true;
+            startX = e.clientX;
+            startY = e.clientY;
+            
+            // Get current image dimensions
+            const imgRect = img.getBoundingClientRect();
+            startWidth = imgRect.width;
+            startHeight = imgRect.height;
+            
+            // Add temporary styles for better visual feedback
+            document.body.style.cursor = 'nw-resize';
+            document.body.style.userSelect = 'none';
+            
+            // Mouse move handler
+            const handleMouseMove = (e: MouseEvent) => {
+                if (!isResizing) return;
+                
+                const deltaX = e.clientX - startX;
+                const deltaY = e.clientY - startY;
+                
+                // Calculate new dimensions (use the larger delta for proportional scaling)
+                const scaleFactor = Math.max(
+                    (startWidth + deltaX) / startWidth,
+                    (startHeight + deltaY) / startHeight
+                );
+                
+                const newWidth = Math.max(50, Math.round(startWidth * scaleFactor));
+                const newHeight = Math.max(50, Math.round(startHeight * scaleFactor));
+                
+                // Apply new dimensions temporarily
+                img.style.width = `${newWidth}px`;
+                img.style.height = `${newHeight}px`;
+                img.style.objectFit = 'cover';
+                
+                // Update handle position during resize
+                updateHandlePosition();
+            };
+            
+            // Mouse up handler
+            const handleMouseUp = (e: MouseEvent) => {
+                if (!isResizing) return;
+                
+                isResizing = false;
+                
+                // Reset cursor and selection
+                document.body.style.cursor = '';
+                document.body.style.userSelect = '';
+                
+                // Get final dimensions
+                const imgRect = img.getBoundingClientRect();
+                const finalWidth = Math.round(imgRect.width);
+                const finalHeight = Math.round(imgRect.height);
+                
+                // Update the markdown with new dimensions
+                this.updateImageSize(finalWidth, finalHeight);
+                
+                // Remove event listeners
+                document.removeEventListener('mousemove', handleMouseMove);
+                document.removeEventListener('mouseup', handleMouseUp);
+            };
+            
+            // Add global event listeners
+            document.addEventListener('mousemove', handleMouseMove);
+            document.addEventListener('mouseup', handleMouseUp);
+        });
+        
         container.appendChild(img);
+        container.appendChild(resizeHandle);
         return container;
+    }
+
+    private updateImageSize(width: number, height: number) {
+        // Dispatch a custom event to update the markdown
+        const updateEvent = new CustomEvent('updateImageSize', {
+            detail: {
+                imagePath: this.imagePath,
+                altText: this.altText,
+                width: width,
+                height: height,
+                align: this.align
+            },
+            bubbles: true
+        });
+        document.dispatchEvent(updateEvent);
     }
 
     private async loadImage(img: HTMLImageElement) {
         try {
-            console.log('Loading image with path:', this.imagePath);
             
             // First try to find the file in the vault by exact path
             let file = this.plugin.app.vault.getAbstractFileByPath(this.imagePath);
-            console.log('Direct path lookup result:', !!file, file?.path);
             
             if (!file) {
                 // Try to resolve relative path from current file
@@ -523,7 +642,6 @@ class ImageWidget extends WidgetType {
             }
             
             if (file && file instanceof TFile) {
-                console.log('Loading image from vault file:', file.path);
                 const arrayBuffer = await this.plugin.app.vault.readBinary(file);
                 const blob = new Blob([arrayBuffer]);
                 const url = URL.createObjectURL(blob);
@@ -1975,6 +2093,15 @@ export class SurveyNoteView extends ItemView {
             this.toggleCheckbox(editor, lineNumber, isChecked);
         });
 
+        // Add handler for image size updates
+        document.addEventListener('updateImageSize', (event: Event) => {
+            const customEvent = event as CustomEvent;
+            const { imagePath, altText, width, height, align } = customEvent.detail;
+            
+            // Update the markdown text with new image dimensions
+            this.updateImageInMarkdown(editor, imagePath, altText, width, height, align);
+        });
+
         // Add click handler for links
         this.registerDomEvent(contentContainer, 'click', (event) => {
             console.log('Click event detected:', event.target);
@@ -2364,6 +2491,87 @@ survey-note-view: note
         } catch (error) {
             console.error('Error creating new SurveyNote:', error);
             new Notice('新しいSurveyNoteの作成に失敗しました: ' + error.message);
+        }
+    }
+
+    /**
+     * Update image dimensions in markdown text
+     */
+    private updateImageInMarkdown(editor: EditorView, imagePath: string, altText: string, width: number, height: number, align: 'left' | 'center' | 'right') {
+        const currentText = editor.state.doc.toString();
+        
+        // Patterns to match various image formats
+        const internalImagePattern = new RegExp(`!\\[\\[${imagePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:\\|[^\\]]*)?\\]\\]`, 'g');
+        const markdownImagePattern = new RegExp(`!\\[${altText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\]\\(${imagePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:\\|[^)]*)?\\)`, 'g');
+        
+        let updatedText = currentText;
+        let wasUpdated = false;
+        
+        // Update internal image format: ![[image.png|200x300|center]]
+        updatedText = updatedText.replace(internalImagePattern, (match) => {
+            wasUpdated = true;
+            
+            // Check if dimensions already exist
+            if (match.includes('|')) {
+                // Remove existing size/alignment info and add new one
+                const baseMatch = match.match(/^!\[\[([^\]|]+)/);
+                if (baseMatch) {
+                    const baseImagePath = baseMatch[1];
+                    let newFormat = `![[${baseImagePath}|${width}x${height}`;
+                    if (align !== 'left') {
+                        newFormat += `|${align}`;
+                    }
+                    newFormat += ']]';
+                    return newFormat;
+                }
+            } else {
+                // Add dimensions to image without existing formatting
+                const baseMatch = match.match(/^!\[\[([^\]]+)\]\]$/);
+                if (baseMatch) {
+                    const baseImagePath = baseMatch[1];
+                    let newFormat = `![[${baseImagePath}|${width}x${height}`;
+                    if (align !== 'left') {
+                        newFormat += `|${align}`;
+                    }
+                    newFormat += ']]';
+                    return newFormat;
+                }
+            }
+            return match;
+        });
+        
+        // Update markdown image format: ![alt](image.png|200x300|center)
+        updatedText = updatedText.replace(markdownImagePattern, (match) => {
+            wasUpdated = true;
+            
+            // Parse the existing format
+            const markdownMatch = match.match(/^!\[([^\]]*)\]\(([^)]+)\)$/);
+            if (markdownMatch) {
+                const altText = markdownMatch[1];
+                const pathPart = markdownMatch[2];
+                
+                // Extract base path (remove existing size/alignment)
+                const basePath = pathPart.split('|')[0];
+                
+                let newFormat = `![${altText}](${basePath}|${width}x${height}`;
+                if (align !== 'left') {
+                    newFormat += `|${align}`;
+                }
+                newFormat += ')';
+                return newFormat;
+            }
+            return match;
+        });
+        
+        if (wasUpdated) {
+            // Update the editor content
+            editor.dispatch({
+                changes: {
+                    from: 0,
+                    to: editor.state.doc.length,
+                    insert: updatedText
+                }
+            });
         }
     }
 }

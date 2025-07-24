@@ -267,6 +267,7 @@
 .image-widget-container {
   display: block;
   margin: 0.5em 0;
+  position: relative;
 }
 
 /* Image alignment */
@@ -315,6 +316,31 @@
 
 .image-editing:hover {
   background-color: var(--background-modifier-border) !important;
+}
+
+/* Image resize handle styling */
+.image-resize-handle {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  background-color: var(--interactive-accent);
+  border: 2px solid var(--background-primary);
+  border-radius: 50%;
+  cursor: nw-resize;
+  opacity: 0;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  z-index: 10;
+  transform: translate(25%, 25%);
+  pointer-events: auto;
+}
+
+.image-widget-container:hover .image-resize-handle {
+  opacity: 1;
+}
+
+.image-resize-handle:hover {
+  background-color: var(--interactive-accent-hover);
+  transform: translate(25%, 25%) scale(1.2);
 }
 
 /* Code block widget styling */
