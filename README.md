@@ -99,6 +99,31 @@ Obsidian用のSurveyNoteプラグインです。ノートを構造化された�
    - SurveyNoteビューのヘッダーにあるファイルアイコン（「Markdown表示に切り替え」）をクリックします。
    - コマンドパレットから「マークダウン表示に切り替え」を実行します。
 
+### レイアウト設定
+フロントマターの`survey-note-view`プロパティでレイアウトを制御できます：
+
+- **`survey-note-view: note`** または **`survey-note-view: 3`**: 3列レイアウト（Content1、Content2、Content3）
+- **`survey-note-view: 2`**: 2列レイアウト（Content1、Content2のみ）
+- **`survey-note-view: 1`**: 1列レイアウト（Content1のみ）
+
+**例：**
+```yaml
+---
+survey-note-view: 2
+---
+# Purpose
+背景や目的
+
+# Summary  
+まとめ
+
+# Content1
+メインコンテンツ1
+
+# Content2  
+メインコンテンツ2
+```
+
 ### データ構造
 - このプラグインは、ノートのフロントマターではなく、**Markdown本文**にデータを保存します。
 - 各セクションの内容は、以下のようなレベル1ヘッダー（`#`）で区切られます。
@@ -196,7 +221,7 @@ npm run version  # バージョン番号の更新
 - [x] 画像を横並びに表示したときに、横いっぱいになってしまい、画像に指定された画像サイズの変更が反映されない
 - [x] セクション名を変更（Content1→Content1、Supplement→Content2、Content2→Content3）
 - [x] 見出しレベルを##から#に変更
-- [ ] contentを1列にもできるようにしよう。2列にでもできるようにする
+- [x] contentを1列にもできるようにしよう。2列にでもできるようにする（survey-note-viewプロパティで制御）
 - [ ] 1.2.などによる<ol>の実装して、番号が適切になるようにする
 - [ ] tableの実装
 - [ ] [[ を入力したときに、最近の利用候補から保管させる

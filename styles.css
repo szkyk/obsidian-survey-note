@@ -39,9 +39,33 @@
   grid-template-rows: auto 1fr; /* Let the second row take remaining space */
   gap: 10px;
   flex-grow: 1; /* Allow grid to fill available space */
+  /* Default layout (3 columns or note) */
   grid-template-areas:
     "background background background summary summary summary"
     "content1 content1 content2 content2 content3 content3";
+}
+
+/* 2 columns layout */
+.surveynote-view-grid.layout-2 {
+  grid-template-areas:
+    "background background background summary summary summary"
+    "content1 content1 content1 content2 content2 content2";
+}
+
+.surveynote-view-grid.layout-2 .grid-item.content3 {
+  display: none;
+}
+
+/* 1 column layout */
+.surveynote-view-grid.layout-1 {
+  grid-template-areas:
+    "background background background summary summary summary"
+    "content1 content1 content1 content1 content1 content1";
+}
+
+.surveynote-view-grid.layout-1 .grid-item.content2,
+.surveynote-view-grid.layout-1 .grid-item.content3 {
+  display: none;
 }
 
 .grid-item {

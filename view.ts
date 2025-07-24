@@ -2063,7 +2063,21 @@ export class SurveyNoteView extends ItemView {
             }
         });
 
-        const gridEl = rootEl.createDiv({ cls: "surveynote-view-grid" });
+        // Get layout type from frontmatter
+        const fileCache = this.app.metadataCache.getFileCache(this.file);
+        const frontmatter = fileCache?.frontmatter;
+        const layoutType = frontmatter?.['survey-note-view'];
+        
+        // Determine layout class
+        let layoutClass = "";
+        if (layoutType === "1") {
+            layoutClass = "layout-1";
+        } else if (layoutType === "2") {
+            layoutClass = "layout-2";
+        }
+        // Default case (note, 3, or undefined) uses no additional class
+        
+        const gridEl = rootEl.createDiv({ cls: `surveynote-view-grid ${layoutClass}`.trim() });
 
         // Create grid items in the specific order to match CSS grid layout
         const gridOrder = [
