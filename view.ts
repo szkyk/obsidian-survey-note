@@ -2624,12 +2624,14 @@ survey-note-view: note
             // Create the new file
             const newFile = await this.app.vault.create(filePath, content);
             
-            // Open the new file in SurveyNote view
-            const leaf = this.app.workspace.getUnpinnedLeaf();
-            await leaf.openFile(newFile);
+            // Create a new tab in the same tab group as the current SurveyNote view
+            const newLeaf = this.app.workspace.getLeaf(true);
+            
+            // Open the new file in the new tab
+            await newLeaf.openFile(newFile);
             
             // Switch to SurveyNote view
-            await this.plugin.setSurveyNoteView(leaf);
+            await this.plugin.setSurveyNoteView(newLeaf);
             
             new Notice(`新しいSurveyNoteを作成しました: ${filename}`);
             
