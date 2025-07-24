@@ -220,9 +220,17 @@ export default class SurveyNotePlugin extends Plugin {
 		const markdownView = leaf.view as MarkdownView;
 
 		// Remove existing action if it exists
-		const actions = (markdownView as any).actions as any[];
+		let actions = (markdownView as any).actions as any[];
+		
+		// Initialize actions array if it doesn't exist
+		if (!actions) {
+			(markdownView as any).actions = [];
+			actions = (markdownView as any).actions;
+		}
+		
 		if (actions) {
 			const existingIndex = actions.findIndex((action: any) => action.id === 'surveynote-switch');
+			
 			if (existingIndex >= 0) {
 				actions.splice(existingIndex, 1);
 			}
@@ -230,9 +238,19 @@ export default class SurveyNotePlugin extends Plugin {
 
 		// Add SurveyNote button if property exists, using the same method as SurveyNoteView
 		if (hasSurveyNoteProperty) {
-			(markdownView as any).addAction('surveynote-icon', 'SurveyNote表示に切り替え', () => {
-				this.setSurveyNoteView(leaf);
-			});
+			// Check if action already exists by checking both the actions array and DOM
+			const existsInDOM = document.querySelector('#surveynote-switch');
+			
+			if (!existsInDOM) {
+				const action = (markdownView as any).addAction('surveynote-icon', 'SurveyNote表示に切り替え', () => {
+					this.setSurveyNoteView(leaf);
+				});
+				
+				// Set the id for proper cleanup
+				if (action) {
+					action.id = 'surveynote-switch';
+				}
+			}
 		}
 
 		// Force header update to reflect changes
