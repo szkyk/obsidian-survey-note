@@ -485,14 +485,17 @@ class ImageWidget extends WidgetType {
             img.style.width = `${this.width}px`;
             img.style.height = `${this.height}px`;
             img.style.objectFit = 'cover'; // Maintain aspect ratio while fitting dimensions
+            img.classList.add('image-with-explicit-size');
         } else if (this.width) {
             console.log('Applying width only:', this.width);
             img.style.width = `${this.width}px`;
             img.style.height = 'auto';
+            img.classList.add('image-with-explicit-size');
         } else if (this.height) {
             console.log('Applying height only:', this.height);
             img.style.height = `${this.height}px`;
             img.style.width = 'auto';
+            img.classList.add('image-with-explicit-size');
         } else {
             // Default responsive behavior
             img.style.maxWidth = '100%';
