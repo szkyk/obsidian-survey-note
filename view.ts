@@ -310,7 +310,7 @@ class CheckboxWidget extends WidgetType {
 }
 
 class CodeBlockWidget extends WidgetType {
-    constructor(private code: string, private language: string = '', private isCollapsed: boolean = false) {
+    constructor(private code: string, private language: string = '', private isCollapsed: boolean = true) {
         super();
     }
 
@@ -319,7 +319,6 @@ class CodeBlockWidget extends WidgetType {
     }
 
     toDOM() {
-        console.log('Creating DOM element for code block:', this.language, this.code.length, 'chars', 'collapsed:', this.isCollapsed);
         const container = document.createElement('div');
         container.className = 'code-block-widget-container';
         
@@ -334,7 +333,6 @@ class CodeBlockWidget extends WidgetType {
         collapseButton.addEventListener('click', (e) => {
             e.preventDefault();
             e.stopPropagation();
-            console.log('Collapse button clicked');
             
             const toggleEvent = new CustomEvent('toggleCodeBlockCollapse', {
                 detail: { target: container, isCollapsed: this.isCollapsed },
@@ -776,11 +774,10 @@ function createInternalLinkExtension(plugin: SurveyNotePlugin) {
             const to = match.index + match[0].length;
             const language = match[1] || '';
             const code = match[2] || '';
-            const isCollapsed = collapseStates ? (collapseStates.get(codeBlockIndex) || false) : false;
+            const isCollapsed = collapseStates ? (collapseStates.get(codeBlockIndex) ?? true) : true;
             
             codeBlockRanges.push({from, to});
             
-            console.log('Found code block:', { match: match[0], language, codeLength: code.length, from, to, isCollapsed, blockIndex: codeBlockIndex });
             
             // Check if cursor/selection is within this code block range
             const cursorInRange = selection && (
