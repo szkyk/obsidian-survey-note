@@ -178,6 +178,137 @@ class ListBulletWidget extends WidgetType {
     }
 }
 
+class CheckboxWidget extends WidgetType {
+    constructor(
+        private indent: string,
+        private isChecked: boolean,
+        private lineNumber: number = 0,
+        private hasChildren: boolean = false,
+        private isCollapsed: boolean = false
+    ) {
+        super();
+    }
+
+    eq(other: CheckboxWidget) {
+        return other.indent === this.indent && 
+               other.isChecked === this.isChecked &&
+               other.lineNumber === this.lineNumber &&
+               other.hasChildren === this.hasChildren &&
+               other.isCollapsed === this.isCollapsed;
+    }
+
+    toDOM() {
+        const container = document.createElement('span');
+        container.className = 'checkbox-widget-container';
+        container.style.display = 'inline-flex';
+        container.style.alignItems = 'center';
+        container.style.userSelect = 'none';
+        
+        // Convert spaces to deeper indentation (same as list bullets)
+        const deeperIndent = this.indent.replace(/  /g, '    ');
+        const tabIndent = this.indent.replace(/\t/g, '    ');
+        const finalIndent = deeperIndent || tabIndent;
+        
+        // Add indent spacing
+        if (finalIndent) {
+            const indentSpan = document.createElement('span');
+            indentSpan.textContent = finalIndent;
+            indentSpan.style.whiteSpace = 'pre';
+            container.appendChild(indentSpan);
+        }
+        
+        // Add chevron if has children
+        if (this.hasChildren) {
+            const chevron = document.createElement('span');
+            chevron.className = 'checkbox-chevron';
+            chevron.textContent = this.isCollapsed ? '▶' : '▼';
+            chevron.style.cursor = 'pointer';
+            chevron.style.marginRight = '4px';
+            chevron.style.marginLeft = '-8px';
+            chevron.style.fontSize = '0.8em';
+            chevron.style.color = 'var(--text-muted)';
+            chevron.style.transition = 'transform 0.2s ease, color 0.2s ease';
+            chevron.style.userSelect = 'none';
+            chevron.style.display = 'inline-flex';
+            chevron.style.alignItems = 'center';
+            chevron.style.justifyContent = 'center';
+            chevron.style.width = '16px';
+            chevron.style.height = '16px';
+            chevron.style.borderRadius = '2px';
+            chevron.style.position = 'relative';
+            chevron.style.zIndex = '10';
+            
+            // Add click handler for chevron
+            chevron.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                console.log('Checkbox chevron clicked for line:', this.lineNumber, 'collapsed:', this.isCollapsed);
+                
+                // Dispatch custom event to toggle collapse state
+                const toggleEvent = new CustomEvent('toggleListCollapse', {
+                    detail: { 
+                        lineNumber: this.lineNumber, 
+                        isCollapsed: this.isCollapsed,
+                        indent: this.indent
+                    },
+                    bubbles: true
+                });
+                chevron.dispatchEvent(toggleEvent);
+            });
+            
+            // Add hover effects
+            chevron.addEventListener('mouseenter', () => {
+                chevron.style.color = 'var(--text-normal)';
+                chevron.style.backgroundColor = 'var(--background-modifier-hover)';
+                chevron.style.transform = 'scale(1.1)';
+            });
+            
+            chevron.addEventListener('mouseleave', () => {
+                chevron.style.color = 'var(--text-muted)';
+                chevron.style.backgroundColor = 'transparent';
+                chevron.style.transform = 'scale(1)';
+            });
+            
+            container.appendChild(chevron);
+        }
+        
+        // Add custom checkbox
+        const checkbox = document.createElement('div');
+        checkbox.className = `checkbox-widget ${this.isChecked ? 'checked' : ''}`;
+        checkbox.style.cursor = 'pointer';
+        
+        // Add checkmark if checked
+        if (this.isChecked) {
+            const checkmark = document.createElement('div');
+            checkmark.className = 'checkbox-checkmark';
+            checkmark.innerHTML = '✓';
+            checkbox.appendChild(checkmark);
+        }
+        
+        // Add click handler for checkbox toggle
+        checkbox.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            console.log('Checkbox clicked for line:', this.lineNumber, 'current state:', this.isChecked);
+            
+            // Dispatch custom event to toggle checkbox state
+            const toggleEvent = new CustomEvent('toggleCheckbox', {
+                detail: { 
+                    lineNumber: this.lineNumber, 
+                    isChecked: this.isChecked,
+                    indent: this.indent
+                },
+                bubbles: true
+            });
+            checkbox.dispatchEvent(toggleEvent);
+        });
+        
+        container.appendChild(checkbox);
+        
+        return container;
+    }
+}
+
 class CodeBlockWidget extends WidgetType {
     constructor(private code: string, private language: string = '', private isCollapsed: boolean = false) {
         super();
@@ -470,7 +601,8 @@ function createInternalLinkExtension(plugin: SurveyNotePlugin) {
     const imageRegex = /!\[([^\]]*)\]\(([^)]+)\)/g;
     const codeBlockRegex = /```(\w*)\n?([\s\S]*?)\n?```/g;
     const urlRegex = /(https?:\/\/[^\s]+)/g;
-    const listItemRegex = /^(\s*)([-*])( +)/gm;
+    const listItemRegex = /^(\s*)([-*])( +)(?!\[[ x]\] )/gm;
+    const checkboxRegex = /^(\s*)- (\[[ x]\]) /gm;
     const collapseMarkerRegex = /<!--(COLLAPSED|HIDDEN)-->/g;
     
     function parseImageOptions(optionsStr: string): { 
@@ -507,22 +639,25 @@ function createInternalLinkExtension(plugin: SurveyNotePlugin) {
         return { width, height, align };
     }
     
-    // Parse list structure to determine which items have children and should be hidden
+    // Parse list and checkbox structure to determine which items have children and should be hidden
     function parseListStructure(text: string): Map<number, { hasChildren: boolean, isCollapsed: boolean, shouldHide: boolean }> {
         const lines = text.split('\n');
         const listInfo = new Map<number, { hasChildren: boolean, isCollapsed: boolean, shouldHide: boolean }>();
         
-        // First pass: identify all list items in the original text 
+        // First pass: identify all list items and checkboxes in the original text 
         const allListItems: Array<{ lineIndex: number, indentLevel: number, isCollapsed: boolean, originalLine: string }> = [];
         
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i];
             // Remove collapse markers for structure analysis but preserve original line
             const cleanLine = line.replace(/<!--(COLLAPSED|HIDDEN)-->/g, '');
-            const match = cleanLine.match(/^(\s*)([-*])( +)/);
             
-            if (match) {
-                const indent = match[1];
+            // Match both regular list items and checkboxes
+            const listMatch = cleanLine.match(/^(\s*)([-*])( +)(?!\[[ x]\] )/);
+            const checkboxMatch = cleanLine.match(/^(\s*)- (\[[ x]\]) /);
+            
+            if (listMatch || checkboxMatch) {
+                const indent = listMatch ? listMatch[1] : (checkboxMatch ? checkboxMatch[1] : '');
                 const indentLevel = indent.length;
                 const isCollapsed = line.includes('<!--COLLAPSED-->');
                 
@@ -584,10 +719,11 @@ function createInternalLinkExtension(plugin: SurveyNotePlugin) {
         // Parse list structure first
         const listStructure = parseListStructure(text);
         
-        // Store markdown link, image, code block, and list item positions for URL scanning
+        // Store markdown link, image, code block, checkbox, and list item positions for URL scanning
         const markdownLinkRanges: Array<{from: number, to: number}> = [];
         const imageRanges: Array<{from: number, to: number}> = [];
         const codeBlockRanges: Array<{from: number, to: number}> = [];
+        const checkboxRanges: Array<{from: number, to: number}> = [];
         const listItemRanges: Array<{from: number, to: number}> = [];
         const hiddenLineRanges: Array<{from: number, to: number}> = [];
         
@@ -759,6 +895,64 @@ function createInternalLinkExtension(plugin: SurveyNotePlugin) {
             newDecorations.push(decoration.range(from, to));
         }
         
+        // Scan for checkboxes - [ ] and - [x]
+        checkboxRegex.lastIndex = 0;
+        while ((match = checkboxRegex.exec(text)) !== null) {
+            const from = match.index;
+            const to = match.index + match[0].length;
+            const indent = match[1]; // Leading spaces/tabs
+            const checkboxState = match[2]; // [x] or [ ]
+            const isChecked = checkboxState === '[x]';
+            
+            checkboxRanges.push({from, to});
+            
+            // Find which line this match corresponds to
+            let lineNumber = 0;
+            lineStart = 0;
+            for (let i = 0; i < lines.length; i++) {
+                const lineEnd = lineStart + lines[i].length;
+                if (from >= lineStart && from <= lineEnd) {
+                    lineNumber = i;
+                    break;
+                }
+                lineStart = lineEnd + 1; // +1 for newline character
+            }
+            
+            // Skip creating checkbox widgets for items that should be hidden
+            const overlapsWithHidden = hiddenLineRanges.some(range => 
+                (from >= range.from && from < range.to) || 
+                (to > range.from && to <= range.to) ||
+                (from <= range.from && to >= range.to)
+            );
+            
+            if (overlapsWithHidden) {
+                console.log('scanForLinks: Skipping checkbox widget creation for hidden line:', lineNumber);
+                continue;
+            }
+            
+            // Get list structure info for this line (includes checkbox structure now)
+            const listInfo = listStructure.get(lineNumber) || { hasChildren: false, isCollapsed: false, shouldHide: false };
+            
+            console.log('scanForLinks: Found checkbox:', { 
+                match: `"${match[0]}"`, 
+                indent: `"${indent}"`, 
+                checkboxState: `"${checkboxState}"`,
+                isChecked,
+                from, 
+                to,
+                lineNumber,
+                hasChildren: listInfo.hasChildren,
+                isCollapsed: listInfo.isCollapsed,
+                shouldHide: listInfo.shouldHide
+            });
+            
+            // Replace the entire match (indent + "- [x] " or "- [ ] ") with our custom widget
+            const decoration = Decoration.replace({
+                widget: new CheckboxWidget(indent, isChecked, lineNumber, listInfo.hasChildren, listInfo.isCollapsed)
+            });
+            newDecorations.push(decoration.range(from, to));
+        }
+        
         // Scan for internal images ![[filename|size]]
         internalImageRegex.lastIndex = 0;
         while ((match = internalImageRegex.exec(text)) !== null) {
@@ -858,8 +1052,8 @@ function createInternalLinkExtension(plugin: SurveyNotePlugin) {
             const to = match.index + match[0].length;
             const fullContent = match[1];
             
-            // Skip if this position overlaps with an image, code block, or list item range
-            const overlapsWithSpecial = [...imageRanges, ...codeBlockRanges, ...listItemRanges].some(range => 
+            // Skip if this position overlaps with an image, code block, list item, or checkbox range
+            const overlapsWithSpecial = [...imageRanges, ...codeBlockRanges, ...listItemRanges, ...checkboxRanges].some(range => 
                 (from >= range.from && from < range.to) || 
                 (to > range.from && to <= range.to) ||
                 (from <= range.from && to >= range.to)
@@ -950,6 +1144,11 @@ function createInternalLinkExtension(plugin: SurveyNotePlugin) {
             }
         });
         listItemRanges.forEach(range => {
+            for (let i = range.from; i < range.to; i++) {
+                excludedPositions.add(i);
+            }
+        });
+        checkboxRanges.forEach(range => {
             for (let i = range.from; i < range.to; i++) {
                 excludedPositions.add(i);
             }
@@ -1059,17 +1258,17 @@ function createListInputHandler() {
                 const beforeCursor = lineText.substring(0, pos);
                 console.log('handleInput: Text before cursor:', `"${beforeCursor}"`);
                 
-                const match = beforeCursor.match(/^(\s*)([-*])$/);
+                const listMatch = beforeCursor.match(/^(\s*)([-*])$/);
                 
-                if (match) {
-                    const indent = match[1];
-                    const bullet = match[2];
+                if (listMatch) {
+                    const indent = listMatch[1];
+                    const bullet = listMatch[2];
                     
                     console.log('handleInput: MATCHED! Converting list item:', { 
                         indent: `"${indent}"`, 
                         bullet: `"${bullet}"`,
                         indentLength: indent.length,
-                        totalMatch: `"${match[0]}"`
+                        totalMatch: `"${listMatch[0]}"`
                     });
                     
                     // Replace the bullet with bullet + space to create the list pattern
@@ -1111,6 +1310,82 @@ function createListInputHandler() {
                 }
             } else {
                 console.log('handleInput: Position too early for list pattern');
+            }
+        }
+        
+        // Check for checkbox patterns: `- [ ` or `- [x`
+        if (text === ' ' || text === '[') {
+            const doc = view.state.doc;
+            const line = doc.lineAt(from);
+            const lineText = line.text;
+            const pos = from - line.from;
+            
+            // Check for `- [ ` pattern
+            if (text === ' ' && pos >= 3) {
+                const beforeCursor = lineText.substring(0, pos);
+                const checkboxMatch = beforeCursor.match(/^(\s*)- \[$/);
+                
+                if (checkboxMatch) {
+                    const indent = checkboxMatch[1];
+                    console.log('handleInput: Converting to unchecked checkbox:', { indent });
+                    
+                    const lineStart = line.from;
+                    const bulletStart = lineStart + indent.length;
+                    const bulletEnd = lineStart + beforeCursor.length;
+                    
+                    view.dispatch({
+                        changes: [
+                            {
+                                from: bulletStart,
+                                to: bulletEnd,
+                                insert: '- [ ]'
+                            },
+                            {
+                                from: bulletEnd,
+                                to: bulletEnd,
+                                insert: ' '
+                            }
+                        ],
+                        selection: { anchor: bulletStart + 6 }, // Position after "- [ ] "
+                        userEvent: "input.type"
+                    });
+                    
+                    return true;
+                }
+            }
+            
+            // Check for `- [x ` pattern 
+            if (text === ' ' && pos >= 4) {
+                const beforeCursor = lineText.substring(0, pos);
+                const checkboxMatch = beforeCursor.match(/^(\s*)- \[x$/);
+                
+                if (checkboxMatch) {
+                    const indent = checkboxMatch[1];
+                    console.log('handleInput: Converting to checked checkbox:', { indent });
+                    
+                    const lineStart = line.from;
+                    const bulletStart = lineStart + indent.length;
+                    const bulletEnd = lineStart + beforeCursor.length;
+                    
+                    view.dispatch({
+                        changes: [
+                            {
+                                from: bulletStart,
+                                to: bulletEnd,
+                                insert: '- [x]'
+                            },
+                            {
+                                from: bulletEnd,
+                                to: bulletEnd,
+                                insert: ' '
+                            }
+                        ],
+                        selection: { anchor: bulletStart + 6 }, // Position after "- [x] "
+                        userEvent: "input.type"
+                    });
+                    
+                    return true;
+                }
             }
         } else {
             console.log('handleInput: Not a space character');
@@ -1174,6 +1449,37 @@ function createListInputHandler() {
                     return true; // Prevent default backspace
                 } else {
                     console.log('handleBackspace: No match for list reconstruction');
+                }
+                
+                // Check for checkbox pattern reconstruction
+                const checkboxMatch = lineText.match(/^(\s*)(.+)$/);
+                if (checkboxMatch) {
+                    const indent = checkboxMatch[1];
+                    const content = checkboxMatch[2];
+                    
+                    // Check if this looks like a line that would have a checkbox widget
+                    const reconstructedChecked = indent + '- [x] ' + content;
+                    const reconstructedUnchecked = indent + '- [ ] ' + content;
+                    const testCheckedMatch = reconstructedChecked.match(/^(\s*)- (\[x\]) (.*)$/);
+                    const testUncheckedMatch = reconstructedUnchecked.match(/^(\s*)- (\[ \]) (.*)$/);
+                    
+                    if ((testCheckedMatch || testUncheckedMatch) && content.trim().length > 0) {
+                        console.log('handleBackspace: MATCHED! Converting back to checkbox markdown with indent:', `"${indent}"`);
+                        
+                        view.dispatch({
+                            changes: {
+                                from: line.from,
+                                to: line.from + indent.length,
+                                insert: indent + '- [ ] '
+                            },
+                            selection: { anchor: line.from + indent.length + 6 },
+                            userEvent: "delete.backward"
+                        });
+                        
+                        return true; // Prevent default backspace
+                    } else {
+                        console.log('handleBackspace: No match for checkbox reconstruction');
+                    }
                 }
             } else {
                 console.log('handleBackspace: No line match');
@@ -1661,6 +1967,17 @@ export class SurveyNoteView extends ItemView {
             }
         });
 
+        // Add handler for checkbox toggle
+        contentContainer.addEventListener('toggleCheckbox', (event: Event) => {
+            const customEvent = event as CustomEvent;
+            const { lineNumber, isChecked } = customEvent.detail;
+            
+            console.log('Toggle checkbox event:', { lineNumber, isChecked });
+            
+            // Toggle the checkbox state by manipulating the document
+            this.toggleCheckbox(editor, lineNumber, isChecked);
+        });
+
         // Add click handler for links
         this.registerDomEvent(contentContainer, 'click', (event) => {
             console.log('Click event detected:', event.target);
@@ -1903,6 +2220,55 @@ export class SurveyNoteView extends ItemView {
             
             console.log('toggleListCollapse: Document updated successfully with', changes.length, 'changes');
         }
+    }
+
+    private toggleCheckbox(editor: EditorView, lineNumber: number, isChecked: boolean) {
+        const doc = editor.state.doc;
+        const lines = doc.toString().split('\n');
+        
+        if (lineNumber >= lines.length) {
+            console.log('toggleCheckbox: Invalid line number', lineNumber, 'total lines:', lines.length);
+            return;
+        }
+        
+        const line = lines[lineNumber];
+        console.log('toggleCheckbox: Toggling checkbox for line', lineNumber, `"${line}"`);
+        
+        // Find the checkbox pattern in the line
+        const checkboxMatch = line.match(/^(\s*)- (\[[ x]\]) (.*)$/);
+        if (!checkboxMatch) {
+            console.log('toggleCheckbox: No checkbox pattern found in line');
+            return;
+        }
+        
+        const indent = checkboxMatch[1];
+        const currentState = checkboxMatch[2];
+        const content = checkboxMatch[3];
+        
+        // Toggle the checkbox state
+        const newState = isChecked ? '[ ]' : '[x]';
+        const newLineContent = `${indent}- ${newState} ${content}`;
+        
+        console.log('toggleCheckbox: Changing from', `"${currentState}"`, 'to', `"${newState}"`);
+        
+        // Calculate line positions
+        let lineStart = 0;
+        for (let i = 0; i < lineNumber; i++) {
+            lineStart += lines[i].length + 1; // +1 for newline character
+        }
+        const lineEnd = lineStart + line.length;
+        
+        // Apply the change
+        editor.dispatch({
+            changes: {
+                from: lineStart,
+                to: lineEnd,
+                insert: newLineContent
+            },
+            userEvent: "select.pointer"
+        });
+        
+        console.log('toggleCheckbox: Checkbox toggled successfully');
     }
 
     private async handleImageDrop(file: File, view: EditorView, title: string) {

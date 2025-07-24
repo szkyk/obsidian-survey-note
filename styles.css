@@ -498,3 +498,82 @@
   visibility: hidden !important;
 }
 
+/* Checkbox widget styling */
+.checkbox-widget-container {
+  display: inline-flex !important;
+  align-items: center !important;
+  user-select: none !important;
+  white-space: pre !important; /* Preserve spaces for indentation */
+  tab-size: 4 !important; /* Make tabs wider */
+}
+
+.checkbox-widget {
+  margin-right: 8px !important;
+  cursor: pointer !important;
+  width: calc(var(--surveynote-font-size, 16px) * 0.9) !important;
+  height: calc(var(--surveynote-font-size, 16px) * 0.9) !important;
+  border-radius: 3px !important;
+  border: 2px solid var(--text-muted) !important;
+  background-color: var(--background-primary) !important;
+  transition: all 0.2s ease !important;
+  position: relative !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  flex-shrink: 0 !important;
+}
+
+.checkbox-widget.checked {
+  background-color: var(--interactive-accent) !important;
+  border-color: var(--interactive-accent) !important;
+}
+
+.checkbox-widget:hover {
+  border-color: var(--interactive-accent) !important;
+  transform: scale(1.1) !important;
+}
+
+.checkbox-widget:focus {
+  outline: 2px solid var(--interactive-accent-hover) !important;
+  outline-offset: 2px !important;
+}
+
+.checkbox-checkmark {
+  color: white !important;
+  font-size: calc(var(--surveynote-font-size, 16px) * 0.7) !important;
+  font-weight: bold !important;
+  line-height: 1 !important;
+  user-select: none !important;
+  pointer-events: none !important;
+}
+
+/* Checkbox chevron styling */
+.checkbox-chevron {
+  cursor: pointer !important;
+  margin-right: 4px !important;
+  margin-left: -8px !important;
+  font-size: 0.8em !important;
+  color: var(--text-muted) !important;
+  transition: transform 0.2s ease, color 0.2s ease !important;
+  user-select: none !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 16px !important;
+  height: 16px !important;
+  border-radius: 2px !important;
+  position: relative !important;
+  z-index: 10 !important;
+}
+
+.checkbox-chevron:hover {
+  color: var(--text-normal) !important;
+  background-color: var(--background-modifier-hover) !important;
+  transform: scale(1.1) !important;
+}
+
+.checkbox-chevron:active {
+  transform: scale(0.95) !important;
+  background-color: var(--background-modifier-border) !important;
+}
+
