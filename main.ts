@@ -215,7 +215,7 @@ export default class SurveyNotePlugin extends Plugin {
 		// Check if file has survey-note-view: note property
 		const fileCache = this.app.metadataCache.getFileCache(file);
 		const frontmatter = fileCache?.frontmatter;
-		const hasSurveyNoteProperty = frontmatter && frontmatter['survey-note-view'] === 'note';
+		const hasSurveyNoteProperty = frontmatter && frontmatter['survey-note-view'];
 
 		const markdownView = leaf.view as MarkdownView;
 
@@ -284,7 +284,7 @@ export default class SurveyNotePlugin extends Plugin {
 		setTimeout(() => {
 			const fileCache = this.app.metadataCache.getFileCache(file);
 			const frontmatter = fileCache?.frontmatter;
-			const hasSurveyNoteProperty = frontmatter && frontmatter['survey-note-view'] === 'note';
+			const hasSurveyNoteProperty = frontmatter && frontmatter['survey-note-view'];
 
 			if (hasSurveyNoteProperty) {
 				const leaf = this.app.workspace.activeLeaf;
