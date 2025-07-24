@@ -407,14 +407,56 @@ class CodeBlockWidget extends WidgetType {
     }
 }
 
+class MultiImageWidget extends WidgetType {
+    constructor(
+        private images: Array<{altText: string, imagePath: string, width?: number, height?: number}>,
+        private plugin: SurveyNotePlugin
+    ) {
+        super();
+    }
+
+    eq(other: MultiImageWidget) {
+        return JSON.stringify(this.images) === JSON.stringify(other.images);
+    }
+
+    toDOM() {
+        const container = document.createElement('div');
+        container.className = 'multi-image-container';
+        
+        this.images.forEach((imageData, index) => {
+            const imageWrapper = document.createElement('div');
+            imageWrapper.className = 'multi-image-item';
+            
+            // Create individual image widget and append to wrapper
+            const singleImageWidget = new ImageWidget(
+                imageData.altText, 
+                imageData.imagePath, 
+                this.plugin, 
+                imageData.width, 
+                imageData.height
+            );
+            
+            const imageDOM = singleImageWidget.toDOM();
+            
+            // Remove the default margin from individual image containers in multi-image context
+            imageDOM.style.margin = '0';
+            imageDOM.style.display = 'inline-block';
+            
+            imageWrapper.appendChild(imageDOM);
+            container.appendChild(imageWrapper);
+        });
+        
+        return container;
+    }
+}
+
 class ImageWidget extends WidgetType {
     constructor(
         private altText: string, 
         private imagePath: string, 
         private plugin: SurveyNotePlugin,
         private width?: number,
-        private height?: number,
-        private align: 'left' | 'center' | 'right' = 'left'
+        private height?: number
     ) {
         super();
     }
@@ -423,14 +465,12 @@ class ImageWidget extends WidgetType {
         return other.altText === this.altText && 
                other.imagePath === this.imagePath &&
                other.width === this.width &&
-               other.height === this.height &&
-               other.align === this.align;
+               other.height === this.height;
     }
 
     toDOM() {
-        console.log('Creating DOM element for image:', this.altText, this.imagePath, 'Size:', this.width, 'x', this.height, 'Align:', this.align);
         const container = document.createElement('div');
-        container.className = `image-widget-container image-align-${this.align}`;
+        container.className = 'image-widget-container';
         
         const img = document.createElement('img');
         img.className = 'image-widget';
@@ -596,8 +636,7 @@ class ImageWidget extends WidgetType {
                 imagePath: this.imagePath,
                 altText: this.altText,
                 width: width,
-                height: height,
-                align: this.align
+                height: height
             },
             bubbles: true
         });
@@ -723,36 +762,19 @@ function createInternalLinkExtension(plugin: SurveyNotePlugin) {
     
     function parseImageOptions(optionsStr: string): { 
         width?: number; 
-        height?: number; 
-        align: 'left' | 'center' | 'right' 
+        height?: number;
     } {
-        if (!optionsStr) return { align: 'left' };
+        if (!optionsStr) return {};
         
-        // Split by | to handle multiple options
-        const parts = optionsStr.split('|').map(part => part.trim()).filter(part => part);
-        
-        let width: number | undefined;
-        let height: number | undefined;
-        let align: 'left' | 'center' | 'right' = 'left';
-        
-        for (const part of parts) {
-            // Check if it's an alignment specification
-            if (['left', 'center', 'right'].includes(part.toLowerCase())) {
-                align = part.toLowerCase() as 'left' | 'center' | 'right';
-                console.log('Found align:', align);
-            }
-            // Check if it's a size specification
-            else {
-                const sizeMatch = part.match(/^(\d+)?(?:x(\d+))?$/);
-                if (sizeMatch) {
-                    width = sizeMatch[1] ? parseInt(sizeMatch[1], 10) : undefined;
-                    height = sizeMatch[2] ? parseInt(sizeMatch[2], 10) : undefined;
-                    console.log('Found size:', { width, height });
-                }
-            }
+        // Parse size specification (e.g., "300x200", "300", "x200")
+        const sizeMatch = optionsStr.match(/^(\d+)?(?:x(\d+))?$/);
+        if (sizeMatch) {
+            const width = sizeMatch[1] ? parseInt(sizeMatch[1], 10) : undefined;
+            const height = sizeMatch[2] ? parseInt(sizeMatch[2], 10) : undefined;
+            return { width, height };
         }
         
-        return { width, height, align };
+        return {};
     }
     
     // Parse list and checkbox structure to determine which items have children and should be hidden
@@ -1068,11 +1090,105 @@ function createInternalLinkExtension(plugin: SurveyNotePlugin) {
             newDecorations.push(decoration.range(from, to));
         }
         
+        // First, scan for lines with multiple images and process them as groups
+        const processedRanges = new Set<string>();
+        const imageLines = text.split('\n');
+        let imageLineStart = 0;
+
+        for (let lineIndex = 0; lineIndex < imageLines.length; lineIndex++) {
+            const line = imageLines[lineIndex];
+            const lineEnd = imageLineStart + line.length;
+            
+            // Count images in this line
+            const internalImages = [...line.matchAll(/!\[\[([^\]]+)\]\]/g)];
+            const markdownImages = [...line.matchAll(/!\[([^\]]*)\]\(([^)]+)\)/g)];
+            const totalImages = internalImages.length + markdownImages.length;
+            
+            if (totalImages > 1) {
+                // Check if cursor/selection is within this multi-image line
+                const cursorInRange = selection && (
+                    (selection.from >= imageLineStart && selection.from <= lineEnd) ||
+                    (selection.to >= imageLineStart && selection.to <= lineEnd) ||
+                    (selection.from <= imageLineStart && selection.to >= lineEnd)
+                );
+
+                if (cursorInRange) {
+                    console.log('Cursor in multi-image line, showing original text');
+                    // Show original text when cursor is in range
+                    const decoration = Decoration.mark({
+                        class: 'image-editing',
+                        attributes: {
+                            'data-image-type': 'multi-image',
+                            'title': `Multiple images (${totalImages} images)`,
+                            'style': 'cursor: pointer; color: var(--text-accent); background-color: var(--background-modifier-hover);'
+                        }
+                    });
+                    newDecorations.push(decoration.range(imageLineStart, lineEnd));
+                } else {
+                    // Process as multi-image line
+                    const images: Array<{altText: string, imagePath: string, width?: number, height?: number, align?: 'left' | 'center' | 'right'}> = [];
+                    
+                    // Collect all images from this line
+                    const allMatches: Array<{type: 'internal' | 'markdown', match: RegExpMatchArray, index: number}> = [];
+                    
+                    internalImages.forEach(match => {
+                        allMatches.push({type: 'internal', match, index: match.index || 0});
+                    });
+                    
+                    markdownImages.forEach(match => {
+                        allMatches.push({type: 'markdown', match, index: match.index || 0});
+                    });
+                    
+                    // Sort by position in line
+                    allMatches.sort((a, b) => a.index - b.index);
+                    
+                    // Process each match
+                    allMatches.forEach(item => {
+                        if (item.type === 'internal') {
+                            const fullContent = item.match[1];
+                            const parts = fullContent.split('|');
+                            const filename = parts[0];
+                            const optionsStr = parts.slice(1).join('|');
+                            const { width, height } = parseImageOptions(optionsStr);
+                            images.push({ altText: '', imagePath: filename, width, height });
+                        } else {
+                            const altText = item.match[1] || '';
+                            const imagePath = item.match[2];
+                            images.push({ altText, imagePath, width: undefined, height: undefined });
+                        }
+                    });
+                    
+                    // Create multi-image widget for the entire line
+                    const decoration = Decoration.replace({
+                        widget: new MultiImageWidget(images, plugin)
+                    });
+                    newDecorations.push(decoration.range(imageLineStart, lineEnd));
+                }
+                
+                // Mark this range as processed
+                processedRanges.add(`${imageLineStart}-${lineEnd}`);
+            }
+            
+            imageLineStart = lineEnd + 1; // +1 for newline character
+        }
+
         // Scan for internal images ![[filename|size]]
         internalImageRegex.lastIndex = 0;
         while ((match = internalImageRegex.exec(text)) !== null) {
             const from = match.index;
             const to = match.index + match[0].length;
+            
+            // Skip if this image is part of a multi-image line
+            let shouldSkip = false;
+            for (const range of processedRanges) {
+                const [rangeStart, rangeEnd] = range.split('-').map(Number);
+                if (from >= rangeStart && to <= rangeEnd) {
+                    shouldSkip = true;
+                    break;
+                }
+            }
+            if (shouldSkip) continue;
+            
             const fullContent = match[1];
             
             // Parse filename and options (align|size)
@@ -1082,11 +1198,9 @@ function createInternalLinkExtension(plugin: SurveyNotePlugin) {
             
             imageRanges.push({from, to});
             
-            console.log('Found internal image:', { match: match[0], filename, optionsStr, from, to });
             
-            // Parse options (align and size)
-            const { width, height, align } = parseImageOptions(optionsStr);
-            console.log('Parsed options:', { width, height, align });
+            // Parse options (size)
+            const { width, height } = parseImageOptions(optionsStr);
             
             // Check if cursor/selection is within this image range
             const cursorInRange = selection && (
@@ -1096,7 +1210,6 @@ function createInternalLinkExtension(plugin: SurveyNotePlugin) {
             );
             
             if (cursorInRange) {
-                console.log('Cursor in internal image range, showing original text');
                 // Show original text when cursor is in range
                 const decoration = Decoration.mark({
                     class: 'image-editing',
@@ -1109,10 +1222,9 @@ function createInternalLinkExtension(plugin: SurveyNotePlugin) {
                 });
                 newDecorations.push(decoration.range(from, to));
             } else {
-                console.log('Cursor outside internal image range, showing image widget');
                 // Show image widget when cursor is outside range
                 const decoration = Decoration.replace({
-                    widget: new ImageWidget('', filename, plugin, width, height, align)
+                    widget: new ImageWidget('', filename, plugin, width, height)
                 });
                 newDecorations.push(decoration.range(from, to));
             }
@@ -1123,12 +1235,23 @@ function createInternalLinkExtension(plugin: SurveyNotePlugin) {
         while ((match = imageRegex.exec(text)) !== null) {
             const from = match.index;
             const to = match.index + match[0].length;
+            
+            // Skip if this image is part of a multi-image line
+            let shouldSkip = false;
+            for (const range of processedRanges) {
+                const [rangeStart, rangeEnd] = range.split('-').map(Number);
+                if (from >= rangeStart && to <= rangeEnd) {
+                    shouldSkip = true;
+                    break;
+                }
+            }
+            if (shouldSkip) continue;
+            
             const altText = match[1];
             const imagePath = match[2];
             
             imageRanges.push({from, to});
             
-            console.log('Found image:', { match: match[0], altText, imagePath, from, to });
             
             // Check if cursor/selection is within this image range
             const cursorInRange = selection && (
@@ -1151,10 +1274,9 @@ function createInternalLinkExtension(plugin: SurveyNotePlugin) {
                 });
                 newDecorations.push(decoration.range(from, to));
             } else {
-                console.log('Cursor outside image range, showing image widget');
                 // Show image widget when cursor is outside range
                 const decoration = Decoration.replace({
-                    widget: new ImageWidget(altText, imagePath, plugin, undefined, undefined, 'left')
+                    widget: new ImageWidget(altText, imagePath, plugin)
                 });
                 newDecorations.push(decoration.range(from, to));
             }
@@ -2096,17 +2218,15 @@ export class SurveyNoteView extends ItemView {
         // Add handler for image size updates
         document.addEventListener('updateImageSize', (event: Event) => {
             const customEvent = event as CustomEvent;
-            const { imagePath, altText, width, height, align } = customEvent.detail;
+            const { imagePath, altText, width, height } = customEvent.detail;
             
             // Update the markdown text with new image dimensions
-            this.updateImageInMarkdown(editor, imagePath, altText, width, height, align);
+            this.updateImageInMarkdown(editor, imagePath, altText, width, height);
         });
 
         // Add click handler for links
         this.registerDomEvent(contentContainer, 'click', (event) => {
-            console.log('Click event detected:', event.target);
             const target = event.target as HTMLElement;
-            console.log('Target classes:', target.className);
             
             // Check for internal links
             let linkElement: HTMLElement | null = null;
@@ -2497,7 +2617,7 @@ survey-note-view: note
     /**
      * Update image dimensions in markdown text
      */
-    private updateImageInMarkdown(editor: EditorView, imagePath: string, altText: string, width: number, height: number, align: 'left' | 'center' | 'right') {
+    private updateImageInMarkdown(editor: EditorView, imagePath: string, altText: string, width: number, height: number) {
         const currentText = editor.state.doc.toString();
         
         // Patterns to match various image formats
@@ -2517,11 +2637,7 @@ survey-note-view: note
                 const baseMatch = match.match(/^!\[\[([^\]|]+)/);
                 if (baseMatch) {
                     const baseImagePath = baseMatch[1];
-                    let newFormat = `![[${baseImagePath}|${width}x${height}`;
-                    if (align !== 'left') {
-                        newFormat += `|${align}`;
-                    }
-                    newFormat += ']]';
+                    const newFormat = `![[${baseImagePath}|${width}x${height}]]`;
                     return newFormat;
                 }
             } else {
@@ -2529,11 +2645,7 @@ survey-note-view: note
                 const baseMatch = match.match(/^!\[\[([^\]]+)\]\]$/);
                 if (baseMatch) {
                     const baseImagePath = baseMatch[1];
-                    let newFormat = `![[${baseImagePath}|${width}x${height}`;
-                    if (align !== 'left') {
-                        newFormat += `|${align}`;
-                    }
-                    newFormat += ']]';
+                    const newFormat = `![[${baseImagePath}|${width}x${height}]]`;
                     return newFormat;
                 }
             }
@@ -2553,11 +2665,7 @@ survey-note-view: note
                 // Extract base path (remove existing size/alignment)
                 const basePath = pathPart.split('|')[0];
                 
-                let newFormat = `![${altText}](${basePath}|${width}x${height}`;
-                if (align !== 'left') {
-                    newFormat += `|${align}`;
-                }
-                newFormat += ')';
+                const newFormat = `![${altText}](${basePath}|${width}x${height})`;
                 return newFormat;
             }
             return match;
