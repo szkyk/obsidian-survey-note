@@ -41,7 +41,7 @@
   flex-grow: 1; /* Allow grid to fill available space */
   grid-template-areas:
     "background background background summary summary summary"
-    "content1 content1 supplement supplement content2 content2";
+    "content1 content1 content2 content2 content3 content3";
 }
 
 .grid-item {
@@ -94,8 +94,8 @@
 
 
 .grid-item.content1,
-.grid-item.supplement,
-.grid-item.content2 {
+.grid-item.content2,
+.grid-item.content3 {
   min-height: 15em;
   display: flex; /* Ensure items can grow */
   flex-direction: column;
@@ -106,8 +106,8 @@
 .grid-item.background { grid-area: background; }
 .grid-item.summary { grid-area: summary; }
 .grid-item.content1 { grid-area: content1; }
-.grid-item.supplement { grid-area: supplement; }
 .grid-item.content2 { grid-area: content2; }
+.grid-item.content3 { grid-area: content3; }
 
 /* Drag and drop styling for CodeMirror */
 .cm-editor.cm-dropCursor {

@@ -16,8 +16,8 @@ const SECTIONS = {
     BACKGROUND: "Purpose",
     SUMMARY: "Summary",
     CONTENT1: "Content1",
-    SUPPLEMENT: "Supplement",
     CONTENT2: "Content2",
+    CONTENT3: "Content3",
 };
 
 const markdownHighlighting = HighlightStyle.define([
@@ -1935,7 +1935,7 @@ export class SurveyNoteView extends ItemView {
         for (const line of lines) {
             let isHeading = false;
             for (const sectionTitle of sectionOrder) {
-                if (line.trim().startsWith(`## ${sectionTitle}`)) {
+                if (line.trim().startsWith(`# ${sectionTitle}`)) {
                     currentSection = sectionTitle;
                     sections[currentSection] = "";
                     isHeading = true;
@@ -1988,14 +1988,14 @@ export class SurveyNoteView extends ItemView {
             let newSectionContent = "";
             const sectionOrder = [
                 SECTIONS.BACKGROUND, SECTIONS.SUMMARY,
-                SECTIONS.CONTENT1, SECTIONS.SUPPLEMENT,
-                SECTIONS.CONTENT2
+                SECTIONS.CONTENT1, SECTIONS.CONTENT2,
+                SECTIONS.CONTENT3
             ];
 
             for (const sectionTitle of sectionOrder) {
                 const sectionContent = this.editorData[sectionTitle];
                 if (sectionContent !== undefined && sectionContent.trim() !== '') {
-                    newSectionContent += `## ${sectionTitle}\n${sectionContent.trim()}\n\n`;
+                    newSectionContent += `# ${sectionTitle}\n${sectionContent.trim()}\n\n`;
                 }
             }
 
@@ -2065,8 +2065,16 @@ export class SurveyNoteView extends ItemView {
 
         const gridEl = rootEl.createDiv({ cls: "surveynote-view-grid" });
 
-        Object.entries(SECTIONS).forEach(([key, title]) => {
-            const cls = key.toLowerCase();
+        // Create grid items in the specific order to match CSS grid layout
+        const gridOrder = [
+            { key: "BACKGROUND", title: SECTIONS.BACKGROUND, cls: "background" },
+            { key: "SUMMARY", title: SECTIONS.SUMMARY, cls: "summary" },
+            { key: "CONTENT1", title: SECTIONS.CONTENT1, cls: "content1" },
+            { key: "CONTENT2", title: SECTIONS.CONTENT2, cls: "content2" },
+            { key: "CONTENT3", title: SECTIONS.CONTENT3, cls: "content3" }
+        ];
+
+        gridOrder.forEach(({ title, cls }) => {
             this.createGridItem(gridEl, title, cls);
         });
     }
@@ -2583,19 +2591,19 @@ export class SurveyNoteView extends ItemView {
 survey-note-view: note
 ---
 
-## Purpose
+# Purpose
 
 
-## Summary
+# Summary
 
 
-## Content1
+# Content1
 
 
-## Supplement
+# Content2
 
 
-## Content2
+# Content3
 
 `;
 
