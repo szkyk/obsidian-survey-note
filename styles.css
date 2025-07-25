@@ -407,7 +407,8 @@
 /* Code block widget styling */
 .code-block-widget-container {
   display: block !important;
-  margin: 0.5em 0 !important;
+  margin-top: calc(0.5em - var(--surveynote-font-size, 16px) * 1.8) !important;
+  margin-bottom: calc(0.5em - var(--surveynote-font-size, 16px) * 1.8) !important;
   background-color: var(--background-primary-alt) !important;
   border: 1px solid var(--background-modifier-border) !important;
   border-radius: 6px !important;
